@@ -75,12 +75,13 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         <?php if ('create' === $task): ?>
           <?php require __DIR__ . '/form/create.php'; ?>
         <?php elseif ('update' === $task): ?>
+          <?php require __DIR__ . '/form/update.php'; ?>
         <?php elseif ('delete' === $task): ?>
         <?php endif; ?>
         <input name="task" type="hidden" value="<?= $task; ?>">
       </form>
     <?php else: ?>
-      <?php if ($base->querySingle("SELECT count(*) FROM sqlite_master WHERE type='table'")): ?>
+      <?php if ($base->querySingle("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")): ?>
         <table border="1">
           <thead>
             <tr>
@@ -90,7 +91,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             </tr>
           </thead>
           <tbody>
-            <?php $rows = $base->query("SELECT name FROM sqlite_master WHERE type='table'"); ?>
+            <?php $rows = $base->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"); ?>
             <?php while ($row = $rows->fetchArray(SQLITE3_NUM)): ?>
               <tr>
                 <td>
