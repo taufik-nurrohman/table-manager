@@ -1,5 +1,10 @@
 <?php session_start();
 
+error_reporting(E_ALL | E_STRICT);
+ini_set('display_errors', true);
+ini_set('display_startup_errors', true);
+ini_set('html_errors', 1);
+
 $p = trim(strtr(strtr(__DIR__ . '/', "\\", '/'), [strtr($_SERVER['DOCUMENT_ROOT'], "\\", '/') => '/']), '/');
 $p = "" !== $p ? '/' . $p . '/index.php' : '/index.php';
 
@@ -30,60 +35,30 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
 
     * {
       box-sizing: border-box;
-      margin: 0;
-      padding: 0;
     }
 
     :root {
       background: #fff;
       color: #000;
-      font: normal normal 12px/18px sans-serif;
-      padding: 12px
-    }
-
-    button,
-    input,
-    select,
-    textarea {
-      padding: 4px;
+      font-family: 'times new roman', serif;
     }
 
     button {
       cursor: pointer;
-      padding-left: 8px;
-      padding-right: 8px;
     }
 
     select {
       cursor: pointer;
     }
 
-    nav,
-    p {
-      display: block;
-      margin: 12px 0;
-    }
-
-    table {
-      border-collapse: collapse;
-      table-layout: fixed;
-      width: 100%;
-    }
-
-    td,
-    th {
-      padding: 6px;
+    th, td {
       text-align: left;
       vertical-align: top;
     }
 
-    table[border] td,
-    table[border] th {
-      border: 1px solid #000;
-    }
-
-    table div + div {
-      margin-top: 6px;
+    body > p:first-child {
+      background: #ff0;
+      padding: .35em .5em;
     }
 
     </style>
