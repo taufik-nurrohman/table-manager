@@ -22,6 +22,11 @@ try {
 if ('POST' === $_SERVER['REQUEST_METHOD']) {
     $task = $_POST['task'];
     require __DIR__ . '/task/' . $task . '.php';
+} else {
+    if (isset($_GET['task']) && 'list' === $_GET['task']) {
+        header('location: ' . $p);
+        exit;
+    }
 }
 
 ?>
@@ -69,53 +74,62 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         <?= $_SESSION['alert']; ?>
       </p>
     <?php endif; ?>
-    <?php if (isset($_GET['task'])): ?>
-      <?php $task = $_GET['task']; ?>
-      <form action="<?= $p; ?>/index.php?task=<?= $task; ?>" method="post">
+    <form action="<?= $p; ?>" method="get">
+      <?php if (isset($_GET['task'])): ?>
+        <button name="task" type="submit" value="list">
+          List
+        </button>
+      <?php else: ?>
+        <button name="task" type="submit" value="create">
+          Create
+        </button>
+      <?php endif; ?>
+    </form>
+    <hr>
+    <form action="<?= $p; ?>?task=<?= $task_default = ($task = $_GET['task'] ?? null) ?? 'create'; ?>" enctype="multipart/form-data" method="post">
+      <?php if ($task): ?>
         <?php if ('create' === $task): ?>
           <?php require __DIR__ . '/form/create.php'; ?>
         <?php elseif ('update' === $task): ?>
           <?php require __DIR__ . '/form/update.php'; ?>
-        <?php elseif ('delete' === $task): ?>
         <?php endif; ?>
-        <input name="task" type="hidden" value="<?= $task; ?>">
-      </form>
-    <?php else: ?>
-      <?php if ($base->querySingle("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")): ?>
-        <table border="1">
-          <thead>
-            <tr>
-              <th>
-                All Tables
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php $rows = $base->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"); ?>
-            <?php while ($row = $rows->fetchArray(SQLITE3_NUM)): ?>
+      <?php else: ?>
+        <?php if ($base->querySingle("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")): ?>
+          <table border="1">
+            <thead>
               <tr>
-                <td>
-                  <a href="<?= $p; ?>?table=<?= $row[0]; ?>&amp;task=update">
-                    <?= $row[0]; ?>
-                  </a>
-                </td>
+                <th>
+                  Tables
+                </th>
+                <th></th>
               </tr>
-            <?php endwhile; ?>
-          </tbody>
-        </table>
-      <?php else: ?>
-        <p>
-          No tables yet.
-        </p>
+            </thead>
+            <tbody>
+              <?php $rows = $base->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"); ?>
+              <?php while ($row = $rows->fetchArray(SQLITE3_NUM)): ?>
+                <tr>
+                  <td>
+                    <a href="<?= $p; ?>?table=<?= $row[0]; ?>&amp;task=update">
+                      <?= $row[0]; ?>
+                    </a>
+                  </td>
+                  <td>
+                    <button name="drop" type="submit" value="<?= $row[0]; ?>">
+                      Drop
+                    </button>
+                  </td>
+                </tr>
+              <?php endwhile; ?>
+            </tbody>
+          </table>
+        <?php else: ?>
+          <p>
+            No tables yet.
+          </p>
+        <?php endif; ?>
       <?php endif; ?>
-    <?php endif; ?>
-    <nav>
-      <?php if (isset($_GET['task'])): ?>
-        <a href="<?= $p; ?>">All Tables</a>
-      <?php else: ?>
-        <a href="<?= $p; ?>?task=create">New Table</a>
-      <?php endif; ?>
-    </nav>
+      <input name="task" type="hidden" value="<?= $task_default; ?>">
+    </form>
   </body>
 </html>
 <?php unset($_SESSION['alert']); ?>

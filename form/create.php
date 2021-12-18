@@ -1,9 +1,10 @@
 <p>
   <label>
     <b>Table Name</b>
-    <br>
-    <input autofocus name="table" pattern="^[a-z][a-z\d]*(?:_[a-z\d]*)*$" placeholder="table_1" required type="text">
   </label>
+  <p>
+    <input autofocus name="table" pattern="^[a-z][a-z\d]*(?:_[a-z\d]*)*$" placeholder="foo_bar_baz" required type="text">
+  </p>
 </p>
 <p>
   <label>
@@ -47,11 +48,11 @@
             <input checked disabled type="checkbox">
             Not Null
           </label>
-          <input name="column[name][]" type="hidden" value="id">
-          <input name="column[type][]" type="hidden" value="INTEGER">
-          <input name="column[primary][]" type="hidden" value="1">
-          <input name="column[increment][]" type="hidden" value="1">
-          <input name="column[vital][]" type="hidden" value="1">
+          <input name="keys[name][]" type="hidden" value="id">
+          <input name="keys[type][]" type="hidden" value="INTEGER">
+          <input name="keys[primary-key][]" type="hidden" value="1">
+          <input name="keys[auto-increment][]" type="hidden" value="1">
+          <input name="keys[not-null][]" type="hidden" value="1">
         </td>
         <td>
           <button disabled title="Remove This Column" type="button">
@@ -77,30 +78,30 @@
 <template id="table-column">
   <tr>
     <td>
-      <input name="column[name][]" pattern="^[a-z][a-z\d]*(?:_[a-z\d]*)*$" placeholder="column_1" required type="text">
+      <input name="keys[name][]" pattern="^[a-z][a-z\d]*(?:_[a-z\d]*)*$" placeholder="foo_bar_baz" required type="text">
     </td>
     <td>
-      <select name="column[type][]" onchange="changeStatus.call(this);">
+      <select name="keys[type][]" onchange="changeStatus.call(this);">
+        <option selected value="TEXT">String</option>
         <option value="BLOB">Blob</option>
         <option value="INTEGER">Integer</option>
         <option value="NULL">Null</option>
-        <option value="REAL">Real</option>
-        <option selected value="TEXT">Text</option>
+        <option value="REAL">Float</option>
       </select>
     </td>
     <td>
       <label>
-        <input name="column[primary][]" type="checkbox" value="1">
+        <input name="keys[primary-key][]" type="checkbox" value="1">
         Primary Key
       </label>
       <br>
       <label>
-        <input disabled name="column[increment][]" type="checkbox" value="1">
+        <input disabled name="keys[auto-increment][]" type="checkbox" value="1">
         Auto Increment
       </label>
       <br>
       <label>
-        <input name="column[vital][]" type="checkbox" value="1">
+        <input name="keys[not-null][]" type="checkbox" value="1">
         Not Null
       </label>
     </td>
@@ -125,11 +126,11 @@ function changeStatus() {
     let value = this.value,
         parent = this.parentNode,
         next = parent.nextElementSibling,
-        increment = next.querySelector('[name="column[increment][]"]');
+        autoIncrement = next.querySelector('[name="keys[auto-increment][]"]');
     if ('INTEGER' === value) {
-        increment.disabled = false;
+        autoIncrement.disabled = false;
     } else {
-        increment.disabled = true;
+        autoIncrement.disabled = true;
     }
 }
 
