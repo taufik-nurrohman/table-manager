@@ -1,68 +1,65 @@
-<?php if ($base->querySingle("SELECT name FROM sqlite_master WHERE type='table' AND name='" . $_GET['table'] . "'")): ?>
-  <table border="1">
+<?php if ($table = Base::table($_GET['table'])): ?>
+  <table border="1" style="width: 100%;">
     <thead>
       <tr>
-        <?php $values = $base->query("PRAGMA table_info(" . $_GET['table'] . ")"); ?>
-        <?php while ($value = $values->fetchArray(SQLITE3_NUM)): ?>
+        <?php foreach ($table as $k => $v): ?>
           <th>
-            <?= $value[1]; ?>
+            <?= $k; ?>
           </th>
-        <?php endwhile; ?>
+        <?php endforeach; ?>
         <th></th>
       </tr>
     </thead>
-    <?php if ($base->querySingle("SELECT count(*) FROM " . $_GET['table'])): ?>
+    <?php if ($rows = Base::rows($_GET['table'])): ?>
       <tbody>
-        <?php $values = $base->query("SELECT * FROM " . $_GET['table']); ?>
-        <?php while ($value = $values->fetchArray(SQLITE3_NUM)): ?>
+        <?php foreach ($rows as $k => $v): ?>
           <tr>
-            <?php foreach ($value as $v): ?>
+            <?php foreach ($v as $kk => $vv): ?>
               <td>
-                <?= htmlspecialchars($v); ?>
+                <?php $vv = htmlspecialchars($vv); ?>
+                <?php $vvv = trim(substr($vv, 0, 120)); ?>
+                <?= $vvv . (strlen($vv) > strlen($vvv) ? '&hellip;' : ""); ?>
               </td>
             <?php endforeach; ?>
             <td>
-              <button name="delete" type="submit" value="<?= $value[0]; ?>">
+              <button name="delete" type="submit" value="<?= $v->ID; ?>">
                 Delete
               </button>
             </td>
           </tr>
-        <?php endwhile; ?>
+        <?php endforeach; ?>
       </tbody>
     <?php endif; ?>
+    <tfoot>
+      <tr>
+        <?php foreach ($table as $k => $v): ?>
+          <?php if ('ID' === $k): ?>
+            <td></td>
+          <?php else: ?>
+            <td>
+              <?php if ('BLOB' === $v): ?>
+                <input name="values[<?= $k; ?>]" style="display: block; width: 100%;" type="file">
+              <?php elseif ('INTEGER' === $v): ?>
+                <input name="values[<?= $k; ?>]" style="display: block; width: 100%;" type="number">
+              <?php elseif ('NULL' === $v): ?>
+                <em>NULL</em>
+              <?php elseif ('REAL' === $v): ?>
+                <input name="values[<?= $k; ?>]" style="display: block; width: 100%;" type="number">
+              <?php else: ?>
+                <textarea name="values[<?= $k; ?>]" style="display: block; width: 100%;"></textarea>
+              <?php endif; ?>
+            </td>
+          <?php endif; ?>
+        <?php endforeach; ?>
+        <td></td>
+      </tr>
+    </tfoot>
   </table>
-  <?php $values = $base->query("PRAGMA table_info(" . $_GET['table'] . ")"); ?>
-  <?php $data = []; while ($value = $values->fetchArray(SQLITE3_NUM)): ?>
-    <?php if ('id' === $value[1]) continue; ?>
-    <?php $data[$value[1]] = $value[2]; ?>
-  <?php endwhile; ?>
-  <?php ksort($data); ?>
-  <?php foreach ($data as $k => $v): ?>
-    <p>
-      <label>
-        <b>
-          <?= $k; ?>
-        </b>
-      </label>
-      <br>
-      <?php if ("" === $v): ?>
-        <em>NULL</em>
-      <?php elseif ('BLOB' === $v): ?>
-        <input name="values[<?= $k; ?>]" type="file">
-      <?php elseif ('INTEGER' === $v): ?>
-        <input max="9223372036854775807" min="-9223372036854775808" name="values[<?= $k; ?>]" step="1" type="number">
-      <?php elseif ('REAL' === $v): ?>
-        <input name="values[<?= $k; ?>]" step="0.001" type="number">
-      <?php elseif ('TEXT' === $v): ?>
-        <textarea name="values[<?= $k; ?>]"></textarea>
-      <?php endif; ?>
-    </p>
-  <?php endforeach; ?>
+  <input name="table" type="hidden" value="<?= $_GET['table']; ?>">
   <p>
-    <button title="Insert Row" type="submit">
+    <button type="submit">
       Insert
     </button>
-    <input name="table" type="hidden" value="<?= $_GET['table']; ?>">
   </p>
 <?php else: ?>
   <p>

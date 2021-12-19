@@ -3,7 +3,7 @@
     <b>Table Name</b>
   </label>
   <p>
-    <input autofocus name="table" pattern="^[a-z][a-z\d]*(?:_[a-z\d]*)*$" placeholder="foo_bar_baz" required type="text">
+    <input autofocus name="table" pattern="^[A-Z_][a-zA-Z\d_]*(?:_[A-Z\d][a-zA-Z\d]*)*$" placeholder="FooBarBaz" required type="text">
   </p>
 </p>
 <p>
@@ -25,42 +25,6 @@
     </thead>
     <tbody>
       <tr>
-        <td>
-          <input disabled type="text" value="id">
-        </td>
-        <td>
-          <select disabled>
-            <option selected>Integer</option>
-          </select>
-        </td>
-        <td>
-          <label>
-            <input checked disabled type="checkbox">
-            Primary Key
-          </label>
-          <br>
-          <label>
-            <input checked disabled type="checkbox">
-            Auto Increment
-          </label>
-          <br>
-          <label>
-            <input checked disabled type="checkbox">
-            Not Null
-          </label>
-          <input name="keys[name][]" type="hidden" value="id">
-          <input name="keys[type][]" type="hidden" value="INTEGER">
-          <input name="keys[primary-key][]" type="hidden" value="1">
-          <input name="keys[auto-increment][]" type="hidden" value="1">
-          <input name="keys[not-null][]" type="hidden" value="1">
-        </td>
-        <td>
-          <button disabled title="Remove This Column" type="button">
-            Remove
-          </button>
-        </td>
-      </tr>
-      <tr>
         <td colspan="4">
           <button onclick="addColumn.call(this);" title="Add Column" type="button">
             Add
@@ -78,23 +42,19 @@
 <template id="table-column">
   <tr>
     <td>
-      <input name="keys[name][]" pattern="^[a-z][a-z\d]*(?:_[a-z\d]*)*$" placeholder="foo_bar_baz" required type="text">
+      <input name="keys[name][]" pattern="^[a-zA-Z_][a-zA-Z\d_]*(?:_[a-zA-Z\d]*)*$" placeholder="fooBarBaz" required type="text">
     </td>
     <td>
       <select name="keys[type][]" onchange="changeStatus.call(this);">
-        <option selected value="TEXT">String</option>
+        <option selected value="TEXT">Text</option>
         <option value="BLOB">Blob</option>
-        <option value="INTEGER">Integer</option>
+        <option value="INTEGER">Number</option>
+        <option value="INTEGER">Toggle</option>
         <option value="NULL">Null</option>
-        <option value="REAL">Float</option>
+        <option value="REAL">Decimal</option>
       </select>
     </td>
     <td>
-      <label>
-        <input name="keys[primary-key][]" type="checkbox" value="1">
-        Primary Key
-      </label>
-      <br>
       <label>
         <input disabled name="keys[auto-increment][]" type="checkbox" value="1">
         Auto Increment
@@ -103,6 +63,16 @@
       <label>
         <input name="keys[not-null][]" type="checkbox" value="1">
         Not Null
+      </label>
+      <br>
+      <label>
+        <input name="keys[primary-key][]" type="checkbox" value="1">
+        Primary Key
+      </label>
+      <br>
+      <label>
+        <input name="keys[unique][]" type="checkbox" value="1">
+        Unique
       </label>
     </td>
     <td>
@@ -120,6 +90,7 @@ function addColumn() {
     let parent = this.parentNode.parentNode,
         clone = column.content.cloneNode(true);
     parent.parentNode.insertBefore(clone, parent);
+    parent.previousElementSibling.querySelector('input').focus();
 }
 
 function changeStatus() {

@@ -1,19 +1,16 @@
 <?php
 
 if (isset($_POST['delete'])) {
-    $rules = "DELETE FROM " . $_POST['table'] . " WHERE id=" . $_POST['delete'];
-    if ($base->exec($rules)) {
+    if (Base::delete($_POST['table'], (int) $_POST['delete'])) {
         $_SESSION['alert'] = 'Deleted 1 row in table <code>' . $_POST['table'] . '</code>.';
         header('location: ' . $p . '?table=' . $_POST['table'] . '&task=update');
         exit;
     }
     $_SESSION['alert'] = 'Could not delete row in table <code>' . $_POST['table'] . '</code>.';
-    $_SESSION['alert'] .= '<br><b>DEBUG:</b> ' . $base->lastErrorMsg();
+    $_SESSION['alert'] .= '<br><b>DEBUG:</b> ' . Base::$error;
     header('location: ' . $p . '?table=' . $_POST['table'] . '&task=update');
     exit;
 }
-
-$rules = "INSERT INTO " . $_POST['table'];
 
 $values = [];
 if (!empty($_POST['values'])) {
@@ -21,22 +18,26 @@ if (!empty($_POST['values'])) {
         if (isset($_FILES['values']['name'][$k])) {
             continue;
         }
-        $values[$k] = "'" . $v . "'";
+        $values[$k] = $v;
     }
-    $rules .= " (" . implode(', ', array_keys($values)) . ") VALUES (" . implode(', ', array_values($values)) . ")";
 }
 
 if (!empty($_FILES['values'])) {
-    // TODO: Upload blob as regular file and store its name to database.
+    foreach ($_FILES['values']['name'] as $k => $v) {
+        if (!empty($_FILES['values']['error'][$k])) {
+            continue;
+        }
+        $values[$k] = 'data:' . $_FILES['values']['type'][$k] . ',' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k]));
+    }
 }
 
-if ($base->exec($rules)) {
+if (Base::insert($_POST['table'], $values)) {
     $_SESSION['alert'] = 'Inserted 1 row to table <code>' . $_POST['table'] . '</code>.';
     header('location: ' . $p . '?table=' . $_POST['table'] . '&task=update');
     exit;
 }
 
 $_SESSION['alert'] = 'Could not insert row into table <code>' . $_POST['table'] . '</code>.';
-$_SESSION['alert'] .= '<br><b>DEBUG:</b> ' . $base->lastErrorMsg();
+$_SESSION['alert'] .= '<br><b>DEBUG:</b> ' . Base::$error;
 header('location: ' . $p . '?table=' . $_POST['table'] . '&task=update');
 exit;
