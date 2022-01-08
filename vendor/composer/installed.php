@@ -1,0 +1,41 @@
+<?php return array(
+    'root' => array(
+        'pretty_version' => '1.0.0+no-version-set',
+        'version' => '1.0.0.0',
+        'type' => 'library',
+        'install_path' => __DIR__ . '/../../',
+        'aliases' => array(),
+        'reference' => NULL,
+        'name' => '__root__',
+        'dev' => true,
+    ),
+    'versions' => array(
+        '__root__' => array(
+            'pretty_version' => '1.0.0+no-version-set',
+            'version' => '1.0.0.0',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../../',
+            'aliases' => array(),
+            'reference' => NULL,
+            'dev_requirement' => false,
+        ),
+        'usmanhalalit/pixie' => array(
+            'pretty_version' => '2.0.2',
+            'version' => '2.0.2.0',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../usmanhalalit/pixie',
+            'aliases' => array(),
+            'reference' => '873e70e63b6802634050d9fb3d38a9bc0c5d23fc',
+            'dev_requirement' => false,
+        ),
+        'usmanhalalit/viocon' => array(
+            'pretty_version' => '1.0.1',
+            'version' => '1.0.1.0',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../usmanhalalit/viocon',
+            'aliases' => array(),
+            'reference' => '0878afee16f15355971fb95bf3c6d297aceff35d',
+            'dev_requirement' => false,
+        ),
+    ),
+);

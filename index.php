@@ -1,4 +1,8 @@
-<?php session_start();
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+session_start();
 
 error_reporting(E_ALL | E_STRICT);
 ini_set('display_errors', true);
@@ -13,191 +17,39 @@ $p = "" !== $p ? '/' . $p . '/index.php' : '/index.php';
 // - Treat table name as PHP class (pascal case)
 // - Treat table column name as class property (camel case)
 
-final class Base {
-
-    public static $base;
-    public static $error;
-    public static $path;
-
-    public static function start(string $path = null) {
-        self::$base = $base = new SQLite3(self::$path = $path);
-        self::$error = false;
-    }
-
-    public static function alter(string $table) {
-        return self::query('ALTER TABLE "' . strtr($table, ['"' => '""']) . '"');
-    }
-
-    public static function create(string $table, array $keys = []) {
-        $query = 'CREATE TABLE "' . strtr($table, ['"' => '""']) . '"';
-        unset($keys['ID']); // `ID` column is hard-coded
-        if ($keys) {
-            $keys['ID'] = 'INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL';
-            $data = [];
-            foreach ($keys as $k => $v) {
-                $data[$k] = trim('"' . strtr($k, ['"' => '""']) . '" ' . $v);
-            }
-            ksort($data);
-            $query .= ' (' . implode(', ', $data) . ')';
-        }
-        return self::query($query);
-    }
-
-    public static function delete(string $table, int $row) {
-        return self::query('DELETE FROM "' . strtr($table, ['"' => '""']) . '" WHERE "ID" = ?', [$row]);
-    }
-
-    public static function drop(string $table) {
-        return self::query('DROP TABLE "' . strtr($table, ['"' => '""']) . '"');
-    }
-
-    public static function insert(string $table, array $values = []) {
-        $query = 'INSERT INTO "' . strtr($table, ['"' => '""']) . '"';
-        if ($values) {
-            ksort($values);
-            foreach ($values as &$v) {
-                if (is_string($v)) {
-                    $v = "'" . strtr($v, ["'" => "''"]) . "'";
-                } else if (false === $v) {
-                    $v = 0; // Replace `false` with `0` because SQLite does not have support for native boolean type
-                } else if (true === $v) {
-                    $v = 1; // Replace `true` with `1` because SQLite does not have support for native boolean type
-                }
-            }
-            return self::query($query . ' (' . implode(', ', array_keys($values)) . ') VALUES (' . implode(', ', array_values($values)) . ')');
-        }
-        return false;
-    }
-
-    public static function query(string $query, array $lot = []) {
-        if (self::$error) {
-            return false;
-        }
-        if (!$lot) {
-            if (!$out = self::$base->query($query)) {
-                self::$error = self::$base->lastErrorMsg();
-                return false;
-            }
-            self::$error = null;
-            return (object) $out;
-        }
-        $stmt = self::$base->prepare($query);
-        foreach ($lot as $k => $v) {
-            $type = SQLITE3_TEXT;
-            if (is_float($v)) {
-                $type = SQLITE3_FLOAT;
-            } else if (is_bool($v) || is_int($v)) {
-                $type = SQLITE3_INTEGER;
-            } else if (is_null($v)) {
-                $type = SQLITE3_NULL;
-            } else if (is_string($v)) {
-                $type = SQLITE3_TEXT;
-            } else {
-                $type = SQLITE3_BLOB;
-            }
-            // `[1, 2, 3]`
-            if (array_keys($lot) === range(0, count($lot) - 1)) {
-                $stmt->bindValue($k + 1, $v, $type);
-            // `{foo: 1, bar: 2, baz: 3}`
-            } else {
-                $stmt->bindValue(':' . $k, $v, $type);
-            }
-        }
-        if (!$out = $stmt->execute()) {
-            self::$error = self::$base->lastErrorMsg();
-            return false;
-        }
-        self::$error = null;
-        return (object) $out;
-    }
-
-    public static function row(string $table, int $id, array $keys = []) {
-        $out = [];
-        ksort($keys);
-        $values = self::query('SELECT ' . ($keys ? implode(', ', $keys) : '*') . ' FROM "' . strtr($table, ['"' => '""']) . '" WHERE "ID" = ?', [$id]);
-        while ($value = $values->fetchArray(SQLITE3_ASSOC)) {
-            ksort($value);
-            $out[] = (object) $value;
-        }
-        return $out;
-    }
-
-    public static function rows(string $table, array $keys = []) {
-        $out = [];
-        ksort($keys);
-        $values = self::query('SELECT ' . ($keys ? implode(', ', $keys) : '*') . ' FROM "' . strtr($table, ['"' => '""']) . '" ORDER BY "ID" DESC');
-        while ($value = $values->fetchArray(SQLITE3_ASSOC)) {
-            ksort($value);
-            $out[] = (object) $value;
-        }
-        return $out;
-    }
-
-    public static function table(string $name) {
-        $values = self::query('PRAGMA table_info("' . strtr($name, ['"' => '""']) . '")');
-        $out = [];
-        while ($value = $values->fetchArray(SQLITE3_NUM)) {
-            $out[$value[1]] = $value[2];
-        }
-        ksort($out);
-        return (object) $out;
-    }
-
-    public static function tables() {
-        $values = self::query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'");
-        $out = [];
-        if ($values) {
-            while ($value = $values->fetchArray(SQLITE3_NUM)) {
-                $v = self::$base->querySingle('SELECT count("ID") FROM "' . strtr($value[0], ['"' => '""']) . '"');
-                $out[$value[0]] = $v; // Total row(s) in table
-            }
-            ksort($out);
-        }
-        return (object) $out;
-    }
-
-    public static function update(string $table, int $row, array $values = []) {
-        if ($values) {
-            ksort($values);
-            foreach ($values as &$v) {
-                if (is_string($v)) {
-                    $v = "'" . strtr($v, ["'" => "''"]) . "'";
-                } else if (false === $v) {
-                    $v = 0;
-                } else if (true === $v) {
-                    $v = 1;
-                }
-            }
-            // TODO
-            $query = 'UPDATE "' . strtr($table, ['"' => '""']) . '" SET ';
-            return self::query("");
-        }
-        return false;
-    }
-
-}
-
 if (!is_file($path = __DIR__ . '/table.db')) {
-    $_SESSION['alert'] = 'Table does not exist. Automatically create table!';
+    $_SESSION['status'] = 'Table does not exist. Automatically create a table for you.';
 }
 
-Base::start($path);
-
-if ($error = Base::$error) {
-    $_SESSION['alert'] = $error;
+try {
+    new \Pixie\Connection('sqlite', [
+        'driver' => 'sqlite',
+        'database' => $path
+    ], 'Base');
+} catch (\Exception $e) {
+    $_SESSION['status'] = strtr($e->getMessage(), [
+        "\n" => '<br>'
+    ]);
+    echo $_SESSION['status'];
+    exit;
 }
 
 if ('POST' === $_SERVER['REQUEST_METHOD']) {
     $task = $_POST['task'];
     if ('create' === $task) {
         if (isset($_POST['drop'])) {
-            if (Base::drop($_POST['drop'])) {
-                $_SESSION['alert'] = 'Dropped table <code>' . $_POST['drop'] . '</code>.';
-                header('location: ' . $p);
-                exit;
+            Base::query('DROP TABLE "' . strtr($table = $_POST['drop'], ['"' => '""']) . '"')->get();
+            if ($errors = Base::pdo()->errorInfo()) {
+                if ('00000' === $errors[0]) {
+                    $_SESSION['status'] = 'Dropped table <code>' . $table . '</code>.';
+                    header('location: ' . $p);
+                    exit;
+                }
+                $_SESSION['status'] = 'Could not drop table <code>' . $table . '</code>.';
+                foreach ($errors as $k => $v) {
+                    $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
+                }
             }
-            $_SESSION['alert'] = 'Could not drop table <code>' . $_POST['drop'] . '</code>.';
-            $_SESSION['alert'] .= '<br><b>DEBUG:</b> ' . Base::$error;
             header('location: ' . $p);
             exit;
         }
@@ -208,31 +60,51 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 $rules .= ' ' . $kk;
             }
             $chops = explode(' ', strtr($_POST['keys']['type'][$k] ?? 'TEXT', [
-                ':default' => $_POST['keys']['value'] ?? 'NULL',
+                ':default' => $_POST['keys']['value'][$k] ?? 'NULL',
                 ':key' => $v
             ]), 2);
             $keys[$v] = trim($chops[0] . $rules . ' ' . ($chops[1] ?? ""));
         }
-        if (Base::create($_POST['table'], $keys)) {
-            $_SESSION['alert'] = 'Created table <code>' . $_POST['table'] . '</code>.';
-            header('location: ' . $p);
-            exit;
+        $query = 'CREATE TABLE "' . strtr($table = $_POST['table'], ['"' => '""']) . '"';
+        unset($keys['ID']); // `ID` column is hard-coded
+        if ($keys) {
+            $keys['ID'] = 'INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL';
+            $data = [];
+            foreach ($keys as $k => $v) {
+                $data[$k] = trim('"' . strtr($k, ['"' => '""']) . '" ' . $v);
+            }
+            ksort($data);
+            $query .= ' (' . implode(', ', $data) . ')';
         }
-        $_SESSION['alert'] = 'Could not create table <code>' . $_POST['table'] . '</code>.';
-        $_SESSION['alert'] .= '<br><b>DEBUG:</b> ' . Base::$error;
+        Base::query($query)->get();
+        if ($errors = Base::pdo()->errorInfo()) {
+            if ('00000' === $errors[0]) {
+                $_SESSION['status'] = 'Created table <code>' . $table . '</code>.';
+                header('location: ' . $p);
+                exit;
+            }
+            $_SESSION['status'] = 'Could not create table <code>' . $table . '</code>.';
+            foreach ($errors as $k => $v) {
+                $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
+            }
+        }
         header('location: ' . $p);
         exit;
     }
     if ('update' === $task) {
         if (isset($_POST['delete'])) {
-            if (Base::delete($_POST['table'], (int) $_POST['delete'])) {
-                $_SESSION['alert'] = 'Deleted 1 row in table <code>' . $_POST['table'] . '</code>.';
-                header('location: ' . $p . '?table=' . $_POST['table'] . '&task=update');
+          if (Base::table($table = $_POST['table'])->where('ID', '=', $id = (int) $_POST['delete'])->delete()) {
+            $_SESSION['status'] = 'Deleted 1 row with ID <code>' . $id . '</code> in table <code>' . $table . '</code>.';
+                header('location: ' . $p . '?table=' . $table . '&task=update');
                 exit;
             }
-            $_SESSION['alert'] = 'Could not delete row in table <code>' . $_POST['table'] . '</code>.';
-            $_SESSION['alert'] .= '<br><b>DEBUG:</b> ' . Base::$error;
-            header('location: ' . $p . '?table=' . $_POST['table'] . '&task=update');
+            $_SESSION['status'] = 'Could not delete row with ID <code>' . $id . '</code> in table <code>' . $table . '</code>.';
+            if ($errors = Base::pdo()->errorInfo()) {
+                foreach ($errors as $k => $v) {
+                    $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
+                }
+            }
+            header('location: ' . $p . '?table=' . $table . '&task=update');
             exit;
         }
         $values = [];
@@ -252,14 +124,18 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 $values[$k] = 'data:' . $_FILES['values']['type'][$k] . ',' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k]));
             }
         }
-        if (Base::insert($_POST['table'], $values)) {
-            $_SESSION['alert'] = 'Inserted 1 row to table <code>' . $_POST['table'] . '</code>.';
-            header('location: ' . $p . '?table=' . $_POST['table'] . '&task=update');
+        if (Base::table($table = $_POST['table'])->insert($values)) {
+            $_SESSION['status'] = 'Inserted 1 row to table <code>' . $table . '</code>.';
+            header('location: ' . $p . '?table=' . $table . '&task=update');
             exit;
         }
-        $_SESSION['alert'] = 'Could not insert row into table <code>' . $_POST['table'] . '</code>.';
-        $_SESSION['alert'] .= '<br><b>DEBUG:</b> ' . Base::$error;
-        header('location: ' . $p . '?table=' . $_POST['table'] . '&task=update');
+        $_SESSION['status'] = 'Could not insert row into table <code>' . $table . '</code>.';
+        if ($errors = Base::pdo()->errorInfo()) {
+            foreach ($errors as $k => $v) {
+                $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
+            }
+        }
+        header('location: ' . $p . '?table=' . $table . '&task=update');
         exit;
     }
 } else {
@@ -268,6 +144,68 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         header('location: ' . $p);
         exit;
     }
+}
+
+// <https://salman-w.blogspot.com/2014/04/stackoverflow-like-pagination.html>
+function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $last) {
+    $begin = 1;
+    $end = (int) ceil($count / $chunk);
+    $s = "";
+    if ($end <= 1) {
+        return $s;
+    }
+    if ($current <= $peek + $peek) {
+        $min = $begin;
+        $max = min($begin + $peek + $peek, $end);
+    } else if ($current > $end - $peek - $peek) {
+        $min = $end - $peek - $peek;
+        $max = $end;
+    } else {
+        $min = $current - $peek;
+        $max = $current + $peek;
+    }
+    if ($previous) {
+        $s = '<span>';
+        if ($current === $begin) {
+            $s .= '<b title="' . $previous . '">' . $previous . '</b>';
+        } else {
+            $s .= '<a href="' . call_user_func($fn, $current - 1) . '" title="' . $previous . '" rel="prev">' . $previous . '</a>';
+        }
+        $s .= '</span> ';
+    }
+    if ($first && $last) {
+        $s .= '<span>';
+        if ($min > $begin) {
+            $s .= '<a href="' . call_user_func($fn, $begin) . '" title="' . $first . '" rel="prev">' . $begin . '</a>';
+            if ($min > $begin + 1) {
+                $s .= ' <span>&hellip;</span>';
+            }
+        }
+        for ($i = $min; $i <= $max; ++$i) {
+            if ($current === $i) {
+                $s .= ' <b title="' . $i . '">' . $i . '</b>';
+            } else {
+                $s .= ' <a href="' . call_user_func($fn, $i) . '" title="' . $i . '" rel="' . ($current >= $i ? 'prev' : 'next') . '">' . $i . '</a>';
+            }
+        }
+        if ($max < $end) {
+            if ($max < $end - 1) {
+                $s .= ' <span>&hellip;</span>';
+            }
+            $s .= ' <a href="' . call_user_func($fn, $end) . '" title="' . $last . '" rel="next">' . $end . '</a>';
+        }
+        $s .= '</span>';
+    }
+    if ($next) {
+        $s .= ' <span>';
+        if ($current === $end) {
+            $s .= '<b title="' . $next . '">' . $next . '</b>';
+        } else {
+            $s .= '<a href="' . call_user_func($fn, $current + 1) . '" title="' . $next . '" rel="next">' . $next . '</a>';
+        }
+        $s .= '</span>';
+    }
+    return $s;
 }
 
 ?>
@@ -304,6 +242,10 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
       text-decoration: none;
     }
 
+    a[aria-current='true'] {
+      color: inherit;
+    }
+
     a:focus,
     a:hover {
       text-decoration: underline;
@@ -332,6 +274,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
     }
 
     input[type='number'],
+    input[type='search'],
     input[type='text'],
     select,
     textarea {
@@ -409,6 +352,10 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
       padding: .35em .5em;
     }
 
+    [role='status'] {
+      color: #f00;
+    }
+
     #table-rows-container li,
     #table-rows-container p,
     #table-rows-container ul {
@@ -447,13 +394,14 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
     </style>
   </head>
   <body>
-    <?php if (isset($_SESSION['alert'])): ?>
+    <?php $task_default = ($task = $_GET['task'] ?? null) ?? 'create'; ?>
+    <?php if (isset($_SESSION['status'])): ?>
       <p role="alert">
-        <?= $_SESSION['alert']; ?>
+        <?= $_SESSION['status']; ?>
       </p>
     <?php endif; ?>
     <form action="<?= $p; ?>" method="get">
-      <?php if (isset($_GET['task'])): ?>
+      <?php if ($task): ?>
         <button name="task" type="submit" value="list">
           List
         </button>
@@ -462,9 +410,12 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
           New Table
         </button>
       <?php endif; ?>
+      <?php if (!$task || 'update' === $task): ?>
+        <input placeholder="Search&hellip;" type="search" value="<?= $_GET['query'] ?? ""; ?>">
+      <?php endif; ?>
     </form>
     <hr>
-    <form action="<?= $p; ?>?task=<?= $task_default = ($task = $_GET['task'] ?? null) ?? 'create'; ?>" enctype="multipart/form-data" method="post">
+    <form action="<?= $p; ?>?task=<?= $task_default; ?>" enctype="multipart/form-data" method="post">
       <?php if ($task): ?>
         <?php if ('create' === $task): ?>
           <p>
@@ -479,21 +430,21 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             <label>
               <b>Table Columns</b>
             </label>
-            <table hidden>
-              <thead>
-                <th>
-                  Name
-                </th>
-                <th>
-                  Type
-                </th>
-                <th>
-                  Actions
-                </th>
-              </thead>
-              <tbody id="table-rows-container"></tbody>
-            </table>
           </p>
+          <table hidden>
+            <thead>
+              <th>
+                Name
+              </th>
+              <th>
+                Type
+              </th>
+              <th>
+                Actions
+              </th>
+            </thead>
+            <tbody id="table-rows-container"></tbody>
+          </table>
           <p>
             <button class="add-table-column" disabled type="button">
               Add Column
@@ -537,38 +488,55 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                         <b>Rules</b>
                       </p>
                       <ul<?= 'TEXT' === $k ? "" : ' hidden'; ?>>
-                        <li>
-                          <label>
-                            <input name="keys[rules][][AUTOINCREMENT]" type="checkbox">
-                            <span>
-                              Automatically increment the value on this field if it was not set explicitly by the user. The automatic value is made based on the last number that has been inserted in the previous action.
-                            </span>
-                          </label>
-                        </li>
-                        <li>
-                          <label>
-                            <input name="keys[rules][][NOT NULL]" type="checkbox">
-                            <span>
-                              Force user to provide specific data on this field, or else the insertion process will be rejected.
-                            </span>
-                          </label>
-                        </li>
-                        <li>
-                          <label>
-                            <input name="keys[rules][][PRIMARY KEY]" type="checkbox">
-                            <span>
-                              Make this field as the primary key.
-                            </span>
-                          </label>
-                        </li>
-                        <li>
-                          <label>
-                            <input name="keys[rules][][UNIQUE]" type="checkbox">
-                            <span>
-                              Make sure this field rejects the given value if it already exists in other records.
-                            </span>
-                          </label>
-                        </li>
+                        <?php if ('Boolean' === $v): ?>
+                          <li>
+                            <label>
+                              <span>Default:</span>
+                              <input max="1" min="0" name="keys[value][]" step="1" type="number" value="0">
+                            </label>
+                          </li>
+                        <?php elseif ('Null' === $v): ?>
+                          <li>
+                            <i>None.</i>
+                          </li>
+                        <?php else: ?>
+                          <?php if ('NUMBER' === $k || 'REAL' === $k): ?>
+                            <li>
+                              <label>
+                                <input name="keys[rules][][AUTOINCREMENT]" type="checkbox">
+                                <span>
+                                  Automatically increment the value on this field if it was not set explicitly by the user. The automatic value is made based on the last number that has been inserted in the previous action.
+                                </span>
+                              </label>
+                            </li>
+                          <?php endif; ?>
+                          <li>
+                            <label>
+                              <input name="keys[rules][][NOT NULL]" type="checkbox">
+                              <span>
+                                Force user to provide specific data on this field, or else the insertion process will be rejected.
+                              </span>
+                            </label>
+                          </li>
+                          <li>
+                            <label>
+                              <input name="keys[rules][][UNIQUE]" type="checkbox">
+                              <span>
+                                Make sure this field rejects the given value if it already exists in other records.
+                              </span>
+                            </label>
+                          </li>
+                          <?php if ('BLOB' === $k): ?>
+                            <li>
+                              <label>
+                                <input checked name="keys[rules][][BASE64]" type="checkbox">
+                                <span>
+                                  Store value as Base64 data URI instead of plain binaries.
+                                </span>
+                              </label>
+                            </li>
+                          <?php endif; ?>
+                        <?php endif; ?>
                       </ul>
                     </li>
                   <?php endforeach; ?>
@@ -644,35 +612,37 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
 
           </script>
         <?php elseif ('update' === $task): ?>
-          <?php if ($table = Base::table($_GET['table'])): ?>
+          <?php if ($table = Base::query('PRAGMA table_info(' . strtr($_GET['table'], ['"' => '""']) . ')')->get()): ?>
             <table>
               <thead>
                 <tr>
                   <?php foreach ($table as $k => $v): ?>
                     <th>
-                      <?= $k; ?>
+                      <?= $v->name; ?><?= '1' === $v->pk ? '<small aria-label="Primary Key" role="status">*</small>' : ""; ?>
                     </th>
                   <?php endforeach; ?>
-                  <th></th>
+                  <th>
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tfoot>
                 <tr>
                   <?php foreach ($table as $k => $v): ?>
-                    <?php if ('ID' === $k): ?>
+                    <?php if ('ID' === $v->name): ?>
                       <td></td>
                     <?php else: ?>
                       <td>
-                        <?php if ('BLOB' === $v): ?>
-                          <input name="values[<?= $k; ?>]" style="display: block; width: 100%;" type="file">
-                        <?php elseif ('INTEGER' === $v): ?>
-                          <input name="values[<?= $k; ?>]" style="display: block; width: 100%;" type="number">
-                        <?php elseif ('NULL' === $v): ?>
+                        <?php if ('BLOB' === $v->type): ?>
+                          <input name="values[<?= $v->name; ?>]" style="display: block; width: 100%;" type="file">
+                        <?php elseif ('INTEGER' === $v->type): ?>
+                          <input name="values[<?= $v->name; ?>]" placeholder="<?= $v->dflt_value ?? ""; ?>" style="display: block; width: 100%;" type="number">
+                        <?php elseif ('NULL' === $v->type): ?>
                           <em>NULL</em>
-                        <?php elseif ('REAL' === $v): ?>
-                          <input name="values[<?= $k; ?>]" style="display: block; width: 100%;" type="number">
+                        <?php elseif ('REAL' === $v->type): ?>
+                          <input name="values[<?= $v->name; ?>]" placeholder="<?= $v->dflt_value ?? ""; ?>" style="display: block; width: 100%;" type="number">
                         <?php else: ?>
-                          <textarea name="values[<?= $k; ?>]" style="display: block; width: 100%;"></textarea>
+                          <textarea name="values[<?= $v->name; ?>]" placeholder="<?= $v->dflt_value ?? ""; ?>" style="display: block; width: 100%;"></textarea>
                         <?php endif; ?>
                       </td>
                     <?php endif; ?>
@@ -685,25 +655,37 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 </tr>
               </tfoot>
             </table>
+            <?php $pager = pager((int) ($_GET['part'] ?? 1), Base::table($_GET['table'])->count(), (int) ($_GET['chunk'] ?? 20), 2, static function($i) use($p) {
+                return $p . '?chunk=' . ($_GET['chunk'] ?? 20) . '&amp;part=' . $i . '&amp;sort[0]=' . ($_GET['sort'][0] ?? '1') . '&amp;sort[1]=' . ($_GET['sort'][1] ?? 'ID') . '&amp;table=' . $_GET['table'] . '&amp;task=update';
+            }, 'First', 'Previous', 'Next', 'Last'); ?>
+            <?php if ($pager): ?>
+              <p>
+                <?= $pager; ?>
+              </p>
+            <?php endif; ?>
             <table>
               <thead>
                 <tr>
                   <?php foreach ($table as $k => $v): ?>
                     <th>
-                      <?= $k; ?>
+                      <a<?= $v->name === ($_GET['sort'][1] ?? 'ID') ? ' aria-current="true"' : ""; ?> href="<?= $p; ?>?chunk=<?= $_GET['chunk'] ?? 20; ?>&amp;part=<?= $_GET['part'] ?? 1; ?>&amp;sort[0]=<?= '1' === ($_GET['sort'][0] ?? '1') ? '-1' : '1'; ?>&amp;sort[1]=<?= $v->name; ?>&amp;table=<?= $_GET['table']; ?>&amp;task=update">
+                        <?= $v->name; ?><?= '1' === $v->pk ? '<small aria-label="Primary Key" role="status">*</small>' : ""; ?>
+                      </a>
                     </th>
                   <?php endforeach; ?>
-                  <th></th>
+                  <th>
+                    Actions
+                  </th>
                 </tr>
               </thead>
-              <?php if ($rows = Base::rows($_GET['table'])): ?>
+              <?php if ($rows = Base::table($_GET['table'])->orderBy($_GET['sort'][1] ?? 'ID', '1' === ($_GET['sort'][0] ?? '1') ? 'ASC' : 'DESC')->limit($chunk = (int) ($_GET['chunk'] ?? 20))->offset($chunk * (((int) ($_GET['part'] ?? 1)) - 1))->get()): ?>
                 <tbody>
                   <?php foreach ($rows as $k => $v): ?>
                     <tr>
                       <?php foreach ($v as $kk => $vv): ?>
                         <td>
                           <?php $vv = htmlspecialchars($vv); ?>
-                          <?php $vvv = trim(substr($vv, 0, 120)); ?>
+                          <?php $vvv = trim(substr($vv, 0, 50)); ?>
                           <?= $vvv . (strlen($vv) > strlen($vvv) ? '&hellip;' : ""); ?>
                         </td>
                       <?php endforeach; ?>
@@ -717,6 +699,11 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 </tbody>
               <?php endif; ?>
             </table>
+            <?php if ($pager): ?>
+              <p>
+                <?= $pager; ?>
+              </p>
+            <?php endif; ?>
             <input name="table" type="hidden" value="<?= $_GET['table']; ?>">
           <?php else: ?>
             <p>
@@ -725,7 +712,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
           <?php endif; ?>
         <?php endif; ?>
       <?php else: ?>
-        <?php if ($tables = (array) Base::tables()): ?>
+        <?php if ($tables = Base::query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")->get()): ?>
           <table>
             <thead>
               <tr>
@@ -739,12 +726,13 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
               <?php foreach ($tables as $k => $v): ?>
                 <tr>
                   <td>
-                    <a href="<?= $p; ?>?table=<?= $k; ?>&amp;task=update"><?= $k; ?></a>
+                    <a href="<?= $p; ?>?table=<?= $v->name; ?>&amp;task=update"><?= $v->name; ?></a>
                     <br>
-                    <small><?= $v . ' Row' . (1 === $v ? "" : 's'); ?></small>
+                    <?php $count = (int) Base::query('SELECT COUNT("ID") FROM "' . strtr($v->name, ['"' => '""']) . '"')->get()[0]->{'COUNT("ID")'}; ?>
+                    <small><?= $count . ' Row' . (1 === $count ? "" : 's'); ?></small>
                   </td>
                   <td>
-                    <button name="drop" onclick="return confirm('Are you sure you want to delete this table with its rows?')" type="submit" value="<?= $k; ?>">
+                    <button name="drop" onclick="return confirm('Are you sure you want to delete this table with its rows?')" type="submit" value="<?= $v->name; ?>">
                       Drop
                     </button>
                   </td>
@@ -762,4 +750,4 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
     </form>
   </body>
 </html>
-<?php unset($_SESSION['alert']); ?>
+<?php unset($_SESSION['status']); ?>
