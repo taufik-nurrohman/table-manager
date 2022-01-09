@@ -1,20 +1,64 @@
-<?php
-
-require __DIR__ . '/vendor/autoload.php';
-
-session_start();
+<?php session_start();
 
 error_reporting(E_ALL | E_STRICT);
+
 ini_set('display_errors', true);
 ini_set('display_startup_errors', true);
 ini_set('error_log', __DIR__ . '/errors.log');
 ini_set('html_errors', 1);
 
-$path = trim(strtr(strtr(__DIR__ . '/', "\\", '/'), [strtr($_SERVER['DOCUMENT_ROOT'], "\\", '/') => '/']), '/');
-$path = "" !== $path ? '/' . $path . '/index.php' : '/index.php';
+require __DIR__ . '/vendor/autoload.php';
+
+$any = [&$_GET, &$_POST, &$_REQUEST];
+$values = [
+    'FALSE' => false,
+    'NULL' => null,
+    'TRUE' => true,
+    'false' => false,
+    'null' => null,
+    'true' => true
+];
+
+array_walk_recursive($any, static function(&$v) use($values) {
+    // Trim white-space and normalize line-break
+    $v = trim(strtr($v, ["\r\n" => "\n", "\r" => "\n"]));
+    if (is_numeric($v)) {
+        $v = false !== strpos($v, '.') ? (float) $v : (int) $v;
+    } else {
+        $v = $values[$v] ?? $v;
+    }
+});
+
+// Naming best practice(s):
+// - Treat table name as PHP class (pascal case)
+// - Treat table column name as class property (camel case)
+
+$FILE = __DIR__ . '/table.db';
+$ID = 'ID';
+$SESSION = 'STATUS';
+
+$PATH = trim(strtr(strtr(__DIR__ . '/', "\\", '/'), [strtr($_SERVER['DOCUMENT_ROOT'], "\\", '/') => '/']), '/');
+$PATH = "" !== $PATH ? '/' . $PATH . '/index.php' : '/index.php';
+
+$path = static function() use($PATH) {
+    return $PATH;
+};
+
+$query = static function(array $alter = []) {
+    $q = http_build_query(array_replace_recursive([
+        'chunk' => $_GET['chunk'] ?? null,
+        'part' => $_GET['part'] ?? null,
+        'query' => $_GET['query'] ?? null,
+        'row' => $_GET['row'] ?? null,
+        'sort' => $_GET['sort'] ?? [],
+        'table' => $_GET['table'] ?? null,
+        'task' => $_GET['task'] ?? null
+    ], $alter));
+    return "" !== $q ? '?' . $q : "";
+};
 
 // <https://salman-w.blogspot.com/2014/04/stackoverflow-like-pagination.html>
-function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $last) {
+$pager = static function($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $last) {
     $begin = 1;
     $end = (int) ceil($count / $chunk);
     $s = "";
@@ -73,41 +117,351 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
         $s .= '</span>';
     }
     return $s;
-}
+};
 
-function query(array $alter = []) {
-    $query = http_build_query(array_replace_recursive([
-        'chunk' => $_GET['chunk'] ?? null,
-        'part' => $_GET['part'] ?? null,
-        'query' => $_GET['query'] ?? null,
-        'row' => $_GET['row'] ?? null,
-        'sort' => $_GET['sort'] ?? [],
-        'table' => $_GET['table'] ?? null,
-        'task' => $_GET['task'] ?? null
-    ], $alter));
-    return "" !== $query ? '?' . $query : "";
-}
-
-// Naming best practice(s):
-// - Treat table name as PHP class (pascal case)
-// - Treat table column name as class property (camel case)
-
-if (!is_file($file = __DIR__ . '/table.db')) {
-    $_SESSION['status'] = 'Table does not exist. Automatically create a table for you.';
+if (!is_file($FILE)) {
+    $_SESSION[$SESSION] = 'Table does not exist. Automatically create a table for you.';
 }
 
 try {
     new Pixie\Connection('sqlite', [
-        'driver' => 'sqlite',
-        'database' => $file
+        'database' => $FILE,
+        'driver' => 'sqlite'
     ], 'Base');
 } catch (Exception $e) {
-    $_SESSION['status'] = strtr($e->getMessage(), [
-        "\n" => '<br>'
-    ]);
-    echo $_SESSION['status'];
+    echo ($_SESSION[$SESSION] = strtr($e->getMessage(), ["\n" => '<br>']));
     exit;
 }
+
+$style = <<<CSS
+* {
+  background: none;
+  box-sizing: border-box;
+  color: inherit;
+  font: inherit;
+  margin: 0;
+  padding: 0;
+}
+:focus {
+  outline: 0;
+}
+:root {
+  background: #fff;
+  color: #000;
+  font: normal normal 18px/1.4 sans-serif;
+  padding: 1em;
+}
+a {
+  color: #00f;
+  text-decoration: none;
+}
+a[aria-current='true'] {
+  color: inherit;
+}
+a:focus,
+a:hover {
+  text-decoration: underline;
+}
+b,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+th {
+  font-weight: bold;
+}
+a[role='button'],
+button {
+  background: #def;
+  border: 2px solid #000;
+  color: inherit;
+  cursor: pointer;
+  display: inline-block;
+  padding: .25em .5em;
+  text-decoration: none;
+  vertical-align: middle;
+}
+a[role='button']:focus,
+button:focus,
+select:focus {
+  border-color: #00f;
+  outline-offset: -4px;
+  outline: 1px solid #00f;
+}
+code {
+  font-family: monospace;
+}
+i {
+  font-style: italic;
+}
+input[type='number'],
+input[type='search'],
+input[type='text'],
+select,
+textarea {
+  background: #fff;
+  border: 2px solid #000;
+  padding: .25em .5em;
+}
+input[type='checkbox'],
+input[type='radio'] {
+  appearance: none;
+  border: 2px solid;
+  height: 1em;
+  margin-top: .125em;
+  min-height: 1em;
+  min-width: 1em;
+  width: 1em;
+}
+input[type='checkbox']:focus,
+input[type='radio']:focus {
+  border-color: #00f;
+  outline: 0;
+}
+input[type='checkbox']:checked,
+input[type='radio']:checked {
+  background: #00f;
+  box-shadow: inset 0 0 0 3px #fff;
+}
+input[type='radio'] {
+  border-radius: 100%;
+}
+form,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+hr,
+ol,
+p,
+table,
+ul {
+  margin: 0 0 1em;
+}
+hr {
+  border: 0;
+  border-top: 1px dashed #000;
+}
+ol,
+ul {
+  margin-left: 1em;
+}
+select {
+  cursor: pointer;
+}
+small {
+  font-size: small;
+}
+table {
+  border-collapse: collapse;
+  table-layout: auto;
+  width: 100%;
+}
+td,
+th {
+  border: 1px solid;
+  padding: .25em;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: #fed;
+}
+[role='alert'] {
+  background: #ff0;
+  padding: .35em .5em;
+}
+[role='status'] {
+  color: #f00;
+}
+form {
+  display: flex;
+  gap: 2em;
+}
+aside {
+  min-width: 10em;
+  order: 1;
+}
+main {
+  flex: 1;
+  order: 2;
+}
+#table-rows-container li,
+#table-rows-container p,
+#table-rows-container ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+#table-rows-container ul ul {
+  margin-left: 1.5em;
+}
+#table-rows-container ul label {
+  align-items: start;
+  cursor: pointer;
+  display: flex;
+  gap: .5em;
+  user-select: none;
+}
+:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+:focus:invalid {
+  border-color: #f00;
+  color: #f00;
+  outline-color: #f00;
+}
+[hidden] {
+  display: none !important;
+}
+CSS;
+
+$title = 'SQLite Table Manager';
+
+$out  = '<!DOCTYPE html>';
+$out .= '<html dir="ltr">';
+$out .= '<head>';
+$out .= '<meta charset="utf-8">';
+$out .= '<meta content="width=device-width" name="viewport">';
+$out .= '<title>';
+$out .= $title;
+$out .= '</title>';
+$out .= '<link href="' . $path() . '/favicon.ico" rel="icon">';
+$out .= '<style>';
+$out .= $style;
+$out .= '</style>';
+$out .= '</head>';
+$out .= '<body>';
+$out .= '<form action="' . $path() . '" enctype="multipart/form-data" method="post">';
+$out .= '<main>';
+
+if (!empty($_GET['table'])) {
+    if ($table = Base::query('PRAGMA table_info("' . ($name = strtr($_GET['table'], ['"' => '""'])) . '")')->get()) {
+        $fields = [];
+        $columns = count((array) $table);
+        $rows = Base::table($name)->count();
+        $out .= '<p role="status">';
+        $out .= $columns . ' Column' . (1 === $columns ? "" : 's');
+        $out .= ', ';
+        $out .= $rows . ' Row' . (1 === $rows ? "" : 's');
+        $out .= '</p>';
+        $out .= '<table>';
+        $out .= '<thead>';
+        $out .= '<tr>';
+
+        foreach ($table as $v) {
+            $fields[] = 'SUBSTR(' . $v->name . ', 1, 50)';
+            $out .= '<th>';
+            $out .= $v->name;
+            if (!empty($v->pk)) {
+                $out .= '<small aria-label="Primary key" role="status">';
+                $out .= '*';
+                $out .= '</small>';
+            }
+            $out .= '</th>';
+        }
+
+        $out .= '</tr>';
+        $out .= '</thead>';
+        $out .= '<tbody>';
+
+        if (0 === $rows) {
+            $out .= '<tr>';
+            $out .= '<td colspan="' . $columns . '" style="text-align: center;">';
+            $out .= '<i aria-label="No rows yet." role="status">EMPTY</i>';
+            $out .= '</td>';
+            $out .= '</tr>';
+        } else {
+            $rows = Base::query('SELECT ID, ' . implode(', ', $fields) . ' FROM "' . $name . '" ORDER BY "' . strtr($_GET['sort'][1] ?? $ID, ['"' => '""']) . '" ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? 20) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
+            foreach ($rows as $row) {
+                $out .= '<tr>';
+                foreach ($row as $k => $v) {
+                    if ($ID === $k) {
+                        continue;
+                    }
+                    $out .= '<td>';
+                    if (null === $v) {
+                        $out .= '<i aria-label="Null value" role="status">NULL</i>';
+                    } else if ("" === $v) {
+                        $out .= '<i aria-label="Empty string value" role="status">EMPTY</i>';
+                    }
+                    $out .= 50 === strlen($v) ? htmlspecialchars($v) . '&hellip;' : htmlspecialchars($v);
+                    $out .= '</td>';
+                }
+                $out .= '</tr>';
+            }
+        }
+
+        $out .= '</tbody>';
+        $out .= '</table>';
+
+        $pagination = $pager($_GET['part'] ?? 1, Base::table($name)->count(), $_GET['chunk'] ?? 20, 2, static function($part) use($ID, $path, $query) {
+            return $path() . strtr($query([
+                'chunk' => $_GET['chunk'] ?? 20,
+                'part' => $part,
+                'sort' => $_GET['sort'] ?? [-1, $ID],
+                'task' => 'select'
+            ]), ['&' => '&amp;']);
+        }, 'First', 'Previous', 'Next', 'Last');
+
+        if ($pagination) {
+            $out .= '<p>';
+            $out .= $pagination;
+            $out .= '</p>';
+        }
+
+    } else {
+        $out .= '<p>';
+        $out .= 'Table <code>' . $name . '</code> does not exist.';
+        $out .= '</p>';
+    }
+} else {
+    $out .= '<p>';
+    $out .= 'Please select a table!';
+    $out .= '</p>';
+}
+
+$out .= '</main>';
+$out .= '<aside>';
+
+$out .= '<h4>';
+$out .= 'Tables';
+$out .= '</h4>';
+
+if ($tables = Base::query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")->get()) {
+    $out .= '<ul>';
+    foreach ($tables as $table) {
+        $out .= '<li>';
+        $out .= '<a' . ($table->name === ($_GET['table'] ?? "") ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
+            'table' => $table->name,
+            'task' => 'select'
+        ]) . '">';
+        $out .= $table->name;
+        $out .= '</a>';
+        $out .= '</li>';
+    }
+    $out .= '</ul>';
+}
+
+$out .= '<p>';
+$out .= '<a href="" role="button">';
+$out .= 'Create';
+$out .= '</a>';
+$out .= '</p>';
+
+$out .= '</aside>';
+$out .= '</form>';
+$out .= '</body>';
+$out .= '</html>';
+
+echo $out;
+
+exit;
 
 if ('POST' === $_SERVER['REQUEST_METHOD']) {
     $table = $_POST['table'] ?? null;
@@ -244,188 +598,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
     <title>
       Table Management System
     </title>
-    <style>
-
-      * {
-        background: none;
-        box-sizing: border-box;
-        color: inherit;
-        font: inherit;
-        margin: 0;
-        padding: 0;
-      }
-
-      :focus {
-        outline: 0;
-      }
-
-      :root {
-        background: #fff;
-        color: #000;
-        font: normal normal 18px/1.4 sans-serif;
-        padding: 1em;
-      }
-
-      a {
-        color: #00f;
-        text-decoration: none;
-      }
-
-      a[aria-current='true'] {
-        color: inherit;
-      }
-
-      a:focus,
-      a:hover {
-        text-decoration: underline;
-      }
-
-      b, th {
-        font-weight: bold;
-      }
-
-      button {
-        background: #def;
-        border: 2px solid #000;
-        cursor: pointer;
-        padding: .25em .5em;
-      }
-
-      button:focus,
-      select:focus {
-        border-color: #00f;
-        outline-offset: -4px;
-        outline: 1px solid #00f;
-      }
-
-      code {
-        font-family: monospace;
-      }
-
-      i {
-        font-style: italic;
-      }
-
-      input[type='number'],
-      input[type='search'],
-      input[type='text'],
-      select,
-      textarea {
-        background: #fff;
-        border: 2px solid #000;
-        padding: .25em .5em;
-      }
-
-      input[type='checkbox'],
-      input[type='radio'] {
-        appearance: none;
-        border: 2px solid;
-        height: 1em;
-        margin-top: .125em;
-        min-height: 1em;
-        min-width: 1em;
-        width: 1em;
-      }
-
-      input[type='checkbox']:focus,
-      input[type='radio']:focus {
-        border-color: #00f;
-        outline: 0;
-      }
-
-      input[type='checkbox']:checked,
-      input[type='radio']:checked {
-        background: #00f;
-        box-shadow: inset 0 0 0 3px #fff;
-      }
-
-      input[type='radio'] {
-        border-radius: 100%;
-      }
-
-      form,
-      hr,
-      p,
-      table {
-        margin: 0 0 1em;
-      }
-
-      hr {
-        border: 0;
-        border-top: 1px dashed #000;
-      }
-
-      select {
-        cursor: pointer;
-      }
-
-      small {
-        font-size: smaller;
-      }
-
-      table {
-        border-collapse: collapse;
-        width: 100%;
-      }
-
-      td,
-      th {
-        border: 1px solid;
-        padding: .25em;
-        text-align: left;
-        vertical-align: top;
-      }
-
-      tfoot td,
-      tfoot th {
-        background: #eee;
-      }
-
-      [role='alert'] {
-        background: #ff0;
-        padding: .35em .5em;
-      }
-
-      [role='status'] {
-        color: #f00;
-      }
-
-      #table-rows-container li,
-      #table-rows-container p,
-      #table-rows-container ul {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-      }
-
-      #table-rows-container ul ul {
-        margin-left: 1.5em;
-      }
-
-      #table-rows-container ul label {
-        align-items: start;
-        cursor: pointer;
-        display: flex;
-        gap: .5em;
-        user-select: none;
-      }
-
-      :disabled {
-        cursor: not-allowed;
-        opacity: .5;
-      }
-
-      :focus:invalid {
-        border-color: #f00;
-        color: #f00;
-        outline-color: #f00;
-      }
-
-      [hidden] {
-        display: none !important;
-      }
-
-    </style>
+    <style></style>
   </head>
   <body>
     <?php $task_default = ($task = $_GET['task'] ?? null) ?? 'create'; ?>
