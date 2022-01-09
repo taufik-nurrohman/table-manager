@@ -331,7 +331,7 @@ $out .= '<meta content="width=device-width" name="viewport">';
 $out .= '<title>';
 $out .= $title;
 $out .= '</title>';
-$out .= '<link href="' . $path() . '/favicon.ico" rel="icon">';
+$out .= '<link href="favicon.ico" rel="icon">';
 $out .= '<style>';
 $out .= $style;
 $out .= '</style>';
