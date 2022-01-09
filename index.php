@@ -10,23 +10,35 @@ ini_set('display_startup_errors', true);
 ini_set('error_log', __DIR__ . '/errors.log');
 ini_set('html_errors', 1);
 
-$p = trim(strtr(strtr(__DIR__ . '/', "\\", '/'), [strtr($_SERVER['DOCUMENT_ROOT'], "\\", '/') => '/']), '/');
-$p = "" !== $p ? '/' . $p . '/index.php' : '/index.php';
+$path = trim(strtr(strtr(__DIR__ . '/', "\\", '/'), [strtr($_SERVER['DOCUMENT_ROOT'], "\\", '/') => '/']), '/');
+$path = "" !== $path ? '/' . $path . '/index.php' : '/index.php';
+
+$query = http_build_query($params = [
+    'chunk' => $_GET['chunk'] ?? null,
+    'part' => $_GET['part'] ?? null,
+    'query' => $_GET['query'] ?? null,
+    'row' => $_GET['row'] ?? null,
+    'sort' => $_GET['sort'] ?? [],
+    'table' => $_GET['table'] ?? null,
+    'task' => $_GET['task'] ?? null
+]);
+
+$query = "" !== $query ? '?' . $query : "";
 
 // Naming best practice(s):
 // - Treat table name as PHP class (pascal case)
 // - Treat table column name as class property (camel case)
 
-if (!is_file($path = __DIR__ . '/table.db')) {
+if (!is_file($file = __DIR__ . '/table.db')) {
     $_SESSION['status'] = 'Table does not exist. Automatically create a table for you.';
 }
 
 try {
-    new \Pixie\Connection('sqlite', [
+    new Pixie\Connection('sqlite', [
         'driver' => 'sqlite',
-        'database' => $path
+        'database' => $file
     ], 'Base');
-} catch (\Exception $e) {
+} catch (Exception $e) {
     $_SESSION['status'] = strtr($e->getMessage(), [
         "\n" => '<br>'
     ]);
@@ -35,14 +47,15 @@ try {
 }
 
 if ('POST' === $_SERVER['REQUEST_METHOD']) {
-    $task = $_POST['task'];
+    $table = $_POST['table'] ?? null;
+    $task = $_POST['task'] ?? null;
     if ('create' === $task) {
         if (isset($_POST['drop'])) {
             Base::query('DROP TABLE "' . strtr($table = $_POST['drop'], ['"' => '""']) . '"')->get();
             if ($errors = Base::pdo()->errorInfo()) {
                 if ('00000' === $errors[0]) {
                     $_SESSION['status'] = 'Dropped table <code>' . $table . '</code>.';
-                    header('location: ' . $p);
+                    header('location: ' . $path . $query);
                     exit;
                 }
                 $_SESSION['status'] = 'Could not drop table <code>' . $table . '</code>.';
@@ -50,7 +63,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                     $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
                 }
             }
-            header('location: ' . $p);
+            header('location: ' . $path);
             exit;
         }
         $keys = [];
@@ -65,7 +78,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             ]), 2);
             $keys[$v] = trim($chops[0] . $rules . ' ' . ($chops[1] ?? ""));
         }
-        $query = 'CREATE TABLE "' . strtr($table = $_POST['table'], ['"' => '""']) . '"';
+        $query = 'CREATE TABLE "' . strtr($table, ['"' => '""']) . '"';
         unset($keys['ID']); // `ID` column is hard-coded
         if ($keys) {
             $keys['ID'] = 'INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL';
@@ -80,7 +93,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         if ($errors = Base::pdo()->errorInfo()) {
             if ('00000' === $errors[0]) {
                 $_SESSION['status'] = 'Created table <code>' . $table . '</code>.';
-                header('location: ' . $p);
+                header('location: ' . $path);
                 exit;
             }
             $_SESSION['status'] = 'Could not create table <code>' . $table . '</code>.';
@@ -88,14 +101,18 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
             }
         }
-        header('location: ' . $p);
+        header('location: ' . $path . $query);
         exit;
     }
     if ('update' === $task) {
+        $params['task'] = $task;
+        $params['table'] = $table;
+        $query = http_build_query($params);
+        $query = "" !== $query ? '?' . $query : "";
         if (isset($_POST['delete'])) {
-          if (Base::table($table = $_POST['table'])->where('ID', '=', $id = (int) $_POST['delete'])->delete()) {
-            $_SESSION['status'] = 'Deleted 1 row with ID <code>' . $id . '</code> in table <code>' . $table . '</code>.';
-                header('location: ' . $p . '?table=' . $table . '&task=update');
+            if (Base::table($table)->where('ID', '=', $id = (int) $_POST['delete'])->delete()) {
+                $_SESSION['status'] = 'Deleted 1 row with ID <code>' . $id . '</code> in table <code>' . $table . '</code>.';
+                header('location: ' . $path . $query);
                 exit;
             }
             $_SESSION['status'] = 'Could not delete row with ID <code>' . $id . '</code> in table <code>' . $table . '</code>.';
@@ -104,7 +121,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                     $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
                 }
             }
-            header('location: ' . $p . '?table=' . $table . '&task=update');
+            header('location: ' . $path . $query);
             exit;
         }
         $values = [];
@@ -124,9 +141,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 $values[$k] = 'data:' . $_FILES['values']['type'][$k] . ',' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k]));
             }
         }
-        if (Base::table($table = $_POST['table'])->insert($values)) {
+        if (Base::table($table)->insert($values)) {
             $_SESSION['status'] = 'Inserted 1 row to table <code>' . $table . '</code>.';
-            header('location: ' . $p . '?table=' . $table . '&task=update');
+            header('location: ' . $path . $query);
             exit;
         }
         $_SESSION['status'] = 'Could not insert row into table <code>' . $table . '</code>.';
@@ -135,13 +152,13 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
             }
         }
-        header('location: ' . $p . '?table=' . $table . '&task=update');
+        header('location: ' . $path . $query);
         exit;
     }
 } else {
-    if (isset($_GET['task']) && 'list' === $_GET['task']) {
+    if (isset($params['task']) && 'list' === $params['task']) {
         // Redirect to home page
-        header('location: ' . $p);
+        header('location: ' . $path);
         exit;
     }
 }
@@ -269,6 +286,10 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
       outline: 1px solid #00f;
     }
 
+    code {
+      font-family: monospace;
+    }
+
     i {
       font-style: italic;
     }
@@ -394,13 +415,13 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
     </style>
   </head>
   <body>
-    <?php $task_default = ($task = $_GET['task'] ?? null) ?? 'create'; ?>
+    <?php $task_default = ($task = $params['task'] ?? null) ?? 'create'; ?>
     <?php if (isset($_SESSION['status'])): ?>
       <p role="alert">
         <?= $_SESSION['status']; ?>
       </p>
     <?php endif; ?>
-    <form action="<?= $p; ?>" method="get">
+    <form action="<?= $path; ?>" method="get">
       <?php if ($task): ?>
         <button name="task" type="submit" value="list">
           List
@@ -411,11 +432,11 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
         </button>
       <?php endif; ?>
       <?php if (!$task || 'update' === $task): ?>
-        <input placeholder="Search&hellip;" type="search" value="<?= $_GET['query'] ?? ""; ?>">
+        <input name="query" placeholder="Search&hellip;" type="search" value="<?= $params['query'] ?? ""; ?>">
       <?php endif; ?>
     </form>
     <hr>
-    <form action="<?= $p; ?>?task=<?= $task_default; ?>" enctype="multipart/form-data" method="post">
+    <form action="<?= $path; ?>?task=<?= $task_default; ?>" enctype="multipart/form-data" method="post">
       <?php if ($task): ?>
         <?php if ('create' === $task): ?>
           <p>
@@ -463,12 +484,12 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
                   <?php
 
                   $types = [
-                      'BLOB' => 'File',
+                      'BLOB' => 'Binary',
                       'INTEGER DEFAULT 0 CHECK (:key IN (0, 1))' => 'Boolean',
-                      'INTEGER' => 'Number',
+                      'INTEGER' => 'Integer',
                       'NULL' => 'Null',
-                      'REAL' => 'Decimal',
-                      'TEXT' => 'Any'
+                      'REAL' => 'Float',
+                      'TEXT' => 'String'
                   ];
 
                   asort($types);
@@ -526,16 +547,6 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
                               </span>
                             </label>
                           </li>
-                          <?php if ('BLOB' === $k): ?>
-                            <li>
-                              <label>
-                                <input checked name="keys[rules][][BASE64]" type="checkbox">
-                                <span>
-                                  Store value as Base64 data URI instead of plain binaries.
-                                </span>
-                              </label>
-                            </li>
-                          <?php endif; ?>
                         <?php endif; ?>
                       </ul>
                     </li>
@@ -612,7 +623,7 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
 
           </script>
         <?php elseif ('update' === $task): ?>
-          <?php if ($table = Base::query('PRAGMA table_info(' . strtr($_GET['table'], ['"' => '""']) . ')')->get()): ?>
+          <?php if ($table = Base::query('PRAGMA table_info(' . strtr($params['table'], ['"' => '""']) . ')')->get()): ?>
             <table>
               <thead>
                 <tr>
@@ -655,8 +666,16 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
                 </tr>
               </tfoot>
             </table>
-            <?php $pager = pager((int) ($_GET['part'] ?? 1), Base::table($_GET['table'])->count(), (int) ($_GET['chunk'] ?? 20), 2, static function($i) use($p) {
-                return $p . '?chunk=' . ($_GET['chunk'] ?? 20) . '&amp;part=' . $i . '&amp;sort[0]=' . ($_GET['sort'][0] ?? '1') . '&amp;sort[1]=' . ($_GET['sort'][1] ?? 'ID') . '&amp;table=' . $_GET['table'] . '&amp;task=update';
+            <?php $pager = pager((int) ($params['part'] ?? 1), Base::table($params['table'])->count(), (int) ($params['chunk'] ?? 20), 2, static function($part) use($params, $path) {
+                unset($params['part']);
+                $query = http_build_query(array_replace([
+                    'chunk' => '20',
+                    'part' => $part,
+                    'sort' => ['-1', 'ID'],
+                    'task' => 'update'
+                ], array_filter($params)));
+                $query = "" !== $query ? '?' . $query : "";
+                return $path . strtr($query, ['&' => '&amp;']);
             }, 'First', 'Previous', 'Next', 'Last'); ?>
             <?php if ($pager): ?>
               <p>
@@ -664,29 +683,40 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
               </p>
             <?php endif; ?>
             <table>
+              <?php $fields = []; ?>
               <thead>
                 <tr>
+                  <?php $p = array_replace([
+                      'chunk' => '20',
+                      'part' => '1',
+                      'task' => 'update'
+                  ], array_filter($params)); ?>
+                  <?php $sort = $p['sort'][0] ?? '-1'; ?>
+                  <?php $p['sort'][0] = '1' === $sort ? '-1' : '1'; /* toggle */ ?>
                   <?php foreach ($table as $k => $v): ?>
                     <th>
-                      <a<?= $v->name === ($_GET['sort'][1] ?? 'ID') ? ' aria-current="true"' : ""; ?> href="<?= $p; ?>?chunk=<?= $_GET['chunk'] ?? 20; ?>&amp;part=<?= $_GET['part'] ?? 1; ?>&amp;sort[0]=<?= '1' === ($_GET['sort'][0] ?? '1') ? '-1' : '1'; ?>&amp;sort[1]=<?= $v->name; ?>&amp;table=<?= $_GET['table']; ?>&amp;task=update">
+                      <?php $p['sort'][1] = $v->name; ksort($p); ?>
+                      <?php $query = http_build_query($p); ?>
+                      <?php $query = "" !== $query ? '?' . $query : ""; ?>
+                      <a<?= $v->name === ($p['sort'][1] ?? 'ID') ? ' aria-current="true"' : ""; ?> href="<?= $path . strtr($query, ['&' => '&amp;']); ?>">
                         <?= $v->name; ?><?= '1' === $v->pk ? '<small aria-label="Primary Key" role="status">*</small>' : ""; ?>
                       </a>
                     </th>
+                    <?php $fields[] = 'SUBSTR(' . $v->name . ', 1, 50)'; ?>
                   <?php endforeach; ?>
                   <th>
                     Actions
                   </th>
                 </tr>
               </thead>
-              <?php if ($rows = Base::table($_GET['table'])->orderBy($_GET['sort'][1] ?? 'ID', '1' === ($_GET['sort'][0] ?? '1') ? 'ASC' : 'DESC')->limit($chunk = (int) ($_GET['chunk'] ?? 20))->offset($chunk * (((int) ($_GET['part'] ?? 1)) - 1))->get()): ?>
+              <?php if ($rows = Base::query('SELECT ID, ' . implode(', ', $fields) . ' FROM "' . strtr($params['table'], ['"' => '""']) . '" ORDER BY "' . strtr($params['sort'][1] ?? 'ID', ['"' => '""']) . '" ' . ('1' === ($params['sort'][0] ?? '-1') ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = (int) ($params['chunk'] ?? 20)) . ' OFFSET ' . ($chunk * (((int) ($params['part'] ?? 1)) - 1)))->get()): ?>
                 <tbody>
                   <?php foreach ($rows as $k => $v): ?>
                     <tr>
                       <?php foreach ($v as $kk => $vv): ?>
+                        <?php if ('ID' === $kk) continue; ?>
                         <td>
-                          <?php $vv = htmlspecialchars($vv); ?>
-                          <?php $vvv = trim(substr($vv, 0, 50)); ?>
-                          <?= $vvv . (strlen($vv) > strlen($vvv) ? '&hellip;' : ""); ?>
+                          <?= 50 === strlen($vv) ? htmlspecialchars($vv) . '&hellip;' : htmlspecialchars($vv); ?>
                         </td>
                       <?php endforeach; ?>
                       <td>
@@ -704,10 +734,12 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
                 <?= $pager; ?>
               </p>
             <?php endif; ?>
-            <input name="table" type="hidden" value="<?= $_GET['table']; ?>">
+            <input name="table" type="hidden" value="<?= $params['table']; ?>">
           <?php else: ?>
             <p>
-              Table <code><?= $_GET['table']; ?></code> does not exist.
+              Table <code>
+                <?= $params['table']; ?>
+              </code> does not exist.
             </p>
           <?php endif; ?>
         <?php endif; ?>
@@ -726,10 +758,15 @@ function pager($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $
               <?php foreach ($tables as $k => $v): ?>
                 <tr>
                   <td>
-                    <a href="<?= $p; ?>?table=<?= $v->name; ?>&amp;task=update"><?= $v->name; ?></a>
+                    <a href="<?= $path; ?>?table=<?= $v->name; ?>&amp;task=update">
+                      <?= $v->name; ?>
+                    </a>
                     <br>
-                    <?php $count = (int) Base::query('SELECT COUNT("ID") FROM "' . strtr($v->name, ['"' => '""']) . '"')->get()[0]->{'COUNT("ID")'}; ?>
-                    <small><?= $count . ' Row' . (1 === $count ? "" : 's'); ?></small>
+                    <?php $columns = count((array) Base::query('PRAGMA table_info("' . strtr($v->name, ['"' => '""']) . '")')->get()); ?>
+                    <?php $rows = Base::table($v->name)->count(); ?>
+                    <small>
+                      <?= $columns . ' Column' . (1 === $columns ? "" : 's'); ?>, <?= $rows . ' Row' . (1 === $rows ? "" : 's'); ?>
+                    </small>
                   </td>
                   <td>
                     <button name="drop" onclick="return confirm('Are you sure you want to delete this table with its rows?')" type="submit" value="<?= $v->name; ?>">
