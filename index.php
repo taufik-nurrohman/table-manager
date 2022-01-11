@@ -35,35 +35,21 @@ array_walk_recursive($any, static function(&$v) use($values) {
 
 $FILE = __DIR__ . '/table.db';
 $ID = 'ID';
+$PATTERN_TABLE = "^[A-Z][a-z\\d]*(?:_?[A-Z\\d][a-z\\d]*)*$";
+$PATTERN_TABLE_COLUMN = "^[A-Za-z][A-Za-z\\d]*(?:_?[A-Za-z\\d][a-z\\d]*)*$";
 $SESSION = 'STATUS';
+$TRUNCATE = 50;
 
 $PATH = trim(strtr(strtr(__DIR__ . '/', "\\", '/'), [strtr($_SERVER['DOCUMENT_ROOT'], "\\", '/') => '/']), '/');
 $PATH = "" !== $PATH ? '/' . $PATH . '/index.php' : '/index.php';
-
-$path = static function() use($PATH) {
-    return $PATH;
-};
-
-$query = static function(array $alter = []) {
-    $q = http_build_query(array_replace_recursive([
-        'chunk' => $_GET['chunk'] ?? null,
-        'part' => $_GET['part'] ?? null,
-        'query' => $_GET['query'] ?? null,
-        'row' => $_GET['row'] ?? null,
-        'sort' => $_GET['sort'] ?? [],
-        'table' => $_GET['table'] ?? null,
-        'task' => $_GET['task'] ?? null
-    ], $alter));
-    return "" !== $q ? '?' . $q : "";
-};
 
 // <https://salman-w.blogspot.com/2014/04/stackoverflow-like-pagination.html>
 $pager = static function($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $last) {
     $begin = 1;
     $end = (int) ceil($count / $chunk);
-    $s = "";
+    $out = "";
     if ($end <= 1) {
-        return $s;
+        return $out;
     }
     if ($current <= $peek + $peek) {
         $min = $begin;
@@ -76,47 +62,60 @@ $pager = static function($current, $count, $chunk, $peek, $fn, $first, $previous
         $max = $current + $peek;
     }
     if ($previous) {
-        $s = '<span>';
+        $out = '<span>';
         if ($current === $begin) {
-            $s .= '<b title="' . $previous . '">' . $previous . '</b>';
+            $out .= '<b title="' . $previous . '">' . $previous . '</b>';
         } else {
-            $s .= '<a href="' . call_user_func($fn, $current - 1) . '" title="' . $previous . '" rel="prev">' . $previous . '</a>';
+            $out .= '<a href="' . call_user_func($fn, $current - 1) . '" title="' . $previous . '" rel="prev">' . $previous . '</a>';
         }
-        $s .= '</span> ';
+        $out .= '</span> ';
     }
     if ($first && $last) {
-        $s .= '<span>';
+        $out .= '<span>';
         if ($min > $begin) {
-            $s .= '<a href="' . call_user_func($fn, $begin) . '" title="' . $first . '" rel="prev">' . $begin . '</a>';
+            $out .= '<a href="' . call_user_func($fn, $begin) . '" title="' . $first . '" rel="prev">' . $begin . '</a>';
             if ($min > $begin + 1) {
-                $s .= ' <span>&hellip;</span>';
+                $out .= ' <span>&hellip;</span>';
             }
         }
         for ($i = $min; $i <= $max; ++$i) {
             if ($current === $i) {
-                $s .= ' <b title="' . $i . '">' . $i . '</b>';
+                $out .= ' <b title="' . $i . '">' . $i . '</b>';
             } else {
-                $s .= ' <a href="' . call_user_func($fn, $i) . '" title="' . $i . '" rel="' . ($current >= $i ? 'prev' : 'next') . '">' . $i . '</a>';
+                $out .= ' <a href="' . call_user_func($fn, $i) . '" title="' . $i . '" rel="' . ($current >= $i ? 'prev' : 'next') . '">' . $i . '</a>';
             }
         }
         if ($max < $end) {
             if ($max < $end - 1) {
-                $s .= ' <span>&hellip;</span>';
+                $out .= ' <span>&hellip;</span>';
             }
-            $s .= ' <a href="' . call_user_func($fn, $end) . '" title="' . $last . '" rel="next">' . $end . '</a>';
+            $out .= ' <a href="' . call_user_func($fn, $end) . '" title="' . $last . '" rel="next">' . $end . '</a>';
         }
-        $s .= '</span>';
+        $out .= '</span>';
     }
     if ($next) {
-        $s .= ' <span>';
+        $out .= ' <span>';
         if ($current === $end) {
-            $s .= '<b title="' . $next . '">' . $next . '</b>';
+            $out .= '<b title="' . $next . '">' . $next . '</b>';
         } else {
-            $s .= '<a href="' . call_user_func($fn, $current + 1) . '" title="' . $next . '" rel="next">' . $next . '</a>';
+            $out .= '<a href="' . call_user_func($fn, $current + 1) . '" title="' . $next . '" rel="next">' . $next . '</a>';
         }
-        $s .= '</span>';
+        $out .= '</span>';
     }
-    return $s;
+    return $out;
+};
+
+$path = static function() use($PATH) {
+    return $PATH;
+};
+
+$query = static function(array $alter = []) {
+    $q = http_build_query(array_replace_recursive($_GET, $alter));
+    return "" !== $q ? '?' . $q : "";
+};
+
+$valid = static function(string $value) {
+    return '"' . strip_tags(strtr($value, ['"' => '""'])) . '"';
 };
 
 if (!is_file($FILE)) {
@@ -163,12 +162,7 @@ a:hover {
   text-decoration: underline;
 }
 b,
-h1,
-h2,
 h3,
-h4,
-h5,
-h6,
 th {
   font-weight: bold;
 }
@@ -179,6 +173,7 @@ button {
   color: inherit;
   cursor: pointer;
   display: inline-block;
+  font-weight: normal;
   padding: .25em .5em;
   text-decoration: none;
   vertical-align: middle;
@@ -203,21 +198,25 @@ select,
 textarea {
   background: #fff;
   border: 2px solid #000;
+  display: inline-block;
+  font-weight: normal;
   padding: .25em .5em;
+  vertical-align: middle;
 }
 input[type='checkbox'],
 input[type='radio'] {
   appearance: none;
   border: 2px solid;
+  display: inline-block;
+  font-weight: normal;
   height: 1em;
-  margin-top: .125em;
   min-height: 1em;
   min-width: 1em;
+  vertical-align: middle;
   width: 1em;
 }
 input[type='checkbox']:focus,
 input[type='radio']:focus {
-  border-color: #00f;
   outline: 0;
 }
 input[type='checkbox']:checked,
@@ -228,13 +227,32 @@ input[type='radio']:checked {
 input[type='radio'] {
   border-radius: 100%;
 }
+label {
+  cursor: pointer;
+  display: inline-block;
+  user-select: none;
+  vertical-align: middle;
+}
+label + input {
+  margin-left: .5em;
+}
+label > input + span {
+  display: inline-block;
+  vertical-align: middle;
+}
+label > input[type='checkbox']:focus + span,
+label > input[type='radio']:focus + span {
+  color: #00f;
+}
+label > input[type='text'] {
+  border: 0;
+  padding: 0;
+}
+label + label {
+  margin-left: .5em;
+}
 form,
-h1,
-h2,
 h3,
-h4,
-h5,
-h6,
 hr,
 ol,
 p,
@@ -264,7 +282,7 @@ table {
 td,
 th {
   border: 1px solid;
-  padding: .25em;
+  padding: .25em .5em;
   text-align: left;
   vertical-align: top;
 }
@@ -289,6 +307,7 @@ aside {
 main {
   flex: 1;
   order: 2;
+  overflow: auto;
 }
 #table-rows-container li,
 #table-rows-container p,
@@ -346,23 +365,31 @@ if (!empty($_GET['table'])) {
         $columns = count((array) $table);
         $rows = Base::table($name)->count();
         $out .= '<p role="status">';
-        $out .= $columns . ' Column' . (1 === $columns ? "" : 's');
+        $out .= '<span id="table-columns">' . $columns . '</span> Column' . (1 === $columns ? "" : 's');
         $out .= ', ';
-        $out .= $rows . ' Row' . (1 === $rows ? "" : 's');
+        $out .= '<span id="table-rows">' . $rows . '</span> Row' . (1 === $rows ? "" : 's');
         $out .= '</p>';
         $out .= '<table>';
         $out .= '<thead>';
         $out .= '<tr>';
 
         foreach ($table as $v) {
-            $fields[] = 'SUBSTR(' . $v->name . ', 1, 50)';
+            if ($ID !== ($n = $v->name)) {
+                $fields[] = 'SUBSTR(' . $valid($n) . ', 1, ' . $TRUNCATE . ') AS ' . $valid($n);
+            } else {
+                $fields[] = $valid($n);
+            }
             $out .= '<th>';
-            $out .= $v->name;
+            $out .= '<a' . ($n === ($_GET['sort'][1] ?? $ID) ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
+                'sort' => [1 === ($_GET['sort'][0] ?? -1) ? -1 : 1, $n]
+            ]) . '">';
+            $out .= $n;
             if (!empty($v->pk)) {
                 $out .= '<small aria-label="Primary key" role="status">';
                 $out .= '*';
                 $out .= '</small>';
             }
+            $out .= '</a>';
             $out .= '</th>';
         }
 
@@ -373,24 +400,28 @@ if (!empty($_GET['table'])) {
         if (0 === $rows) {
             $out .= '<tr>';
             $out .= '<td colspan="' . $columns . '" style="text-align: center;">';
-            $out .= '<i aria-label="No rows yet." role="status">EMPTY</i>';
+            $out .= '<i aria-label="No rows yet." role="status">';
+            $out .= 'EMPTY';
+            $out .= '</i>';
             $out .= '</td>';
             $out .= '</tr>';
         } else {
-            $rows = Base::query('SELECT ID, ' . implode(', ', $fields) . ' FROM "' . $name . '" ORDER BY "' . strtr($_GET['sort'][1] ?? $ID, ['"' => '""']) . '" ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? 20) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
+            sort($fields);
+            $rows = Base::query('SELECT ' . implode(', ', $fields) . ' FROM ' . $valid($name) . ' ORDER BY ' . $valid($_GET['sort'][1] ?? $ID) . ' ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? 20) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
             foreach ($rows as $row) {
                 $out .= '<tr>';
                 foreach ($row as $k => $v) {
-                    if ($ID === $k) {
-                        continue;
-                    }
                     $out .= '<td>';
                     if (null === $v) {
-                        $out .= '<i aria-label="Null value" role="status">NULL</i>';
+                        $out .= '<i aria-label="Null value" role="status">';
+                        $out .= 'NULL';
+                        $out .= '</i>';
                     } else if ("" === $v) {
-                        $out .= '<i aria-label="Empty string value" role="status">EMPTY</i>';
+                        $out .= '<i aria-label="Empty string value" role="status">';
+                        $out .= 'EMPTY';
+                        $out .= '</i>';
                     }
-                    $out .= 50 === strlen($v) ? htmlspecialchars($v) . '&hellip;' : htmlspecialchars($v);
+                    $out .= $TRUNCATE === strlen($v) ? htmlspecialchars($v) . '&hellip;' : htmlspecialchars($v);
                     $out .= '</td>';
                 }
                 $out .= '</tr>';
@@ -400,20 +431,57 @@ if (!empty($_GET['table'])) {
         $out .= '</tbody>';
         $out .= '</table>';
 
-        $pagination = $pager($_GET['part'] ?? 1, Base::table($name)->count(), $_GET['chunk'] ?? 20, 2, static function($part) use($ID, $path, $query) {
+        $the_pager = $pager($_GET['part'] ?? 1, Base::table($name)->count(), $_GET['chunk'] ?? 20, 2, static function($part) use($ID, $path, $query) {
             return $path() . strtr($query([
                 'chunk' => $_GET['chunk'] ?? 20,
                 'part' => $part,
-                'sort' => $_GET['sort'] ?? [-1, $ID],
-                'task' => 'select'
+                'sort' => $_GET['sort'] ?? [-1, $ID]
             ]), ['&' => '&amp;']);
         }, 'First', 'Previous', 'Next', 'Last');
 
-        if ($pagination) {
+        if ($the_pager) {
             $out .= '<p>';
-            $out .= $pagination;
+            $out .= $the_pager;
             $out .= '</p>';
         }
+
+        $out .= '<p>';
+        $out .= '<button name="drop" type="submit" value=' . $valid($_GET['table']) . '>';
+        $out .= 'Drop';
+        $out .= '</button>';
+        $out .= '</p>';
+        $out .= '<script>';
+        $out .= <<<JS
+const drop = document.querySelector('button[name=drop]');
+const tableColumns = document.querySelector('#table-columns').textContent.trim();
+const tableRows = document.querySelector('#table-rows').textContent.trim();
+drop.addEventListener('click', dropTable, false);
+function dropTable(e) {
+    if (window.confirm('Dropping a table is a dangerous action. We need to confirm that you consciously want to do so.')) {
+        let table = window.prompt('Please write down the table name you want to drop:');
+        if (table && table === this.value) {
+            let rows = window.prompt('Please write down the number of rows in table “' + table + '”:');
+            rows = rows + "";
+            if ("" !== rows && rows === tableRows) {
+                let columns = window.prompt('Please write down the number of columns in table “' + table + '”:');
+                columns = columns + "";
+                if ("" !== columns && columns === tableColumns) {
+                    // Pass!
+                } else {
+                    e.preventDefault();
+                }
+            } else {
+                e.preventDefault();
+            }
+        } else {
+            e.preventDefault();
+        }
+    } else {
+        e.preventDefault();
+    }
+}
+JS;
+        $out .= '</script>';
 
     } else {
         $out .= '<p>';
@@ -421,25 +489,170 @@ if (!empty($_GET['table'])) {
         $out .= '</p>';
     }
 } else {
-    $out .= '<p>';
-    $out .= 'Please select a table!';
-    $out .= '</p>';
+    $task = $_GET['task'] ?? null;
+    if ('create' === $task) {
+        $out .= '<h3>';
+        $out .= 'Create Table';
+        $out .= '</h3>';
+        $out .= '<p>';
+        $out .= '<label for="' . ($id = 'f:' . substr(uniqid(), 6)) . '">';
+        $out .= 'Name';
+        $out .= '</label>';
+        $out .= '<input autofocus id="' . $id . '" name="table" placeholder="FooBarBaz" pattern="' . $PATTERN_TABLE . '" required type="text">';
+        $out .= ' ';
+        $out .= '<button class="add" title="Add Column" type="button">';
+        $out .= '&plus;';
+        $out .= '</button>';
+        $out .= '<table>';
+        $out .= '<thead>';
+        $out .= '<tr>';
+        $out .= '<th scope="col">';
+        $out .= 'Name';
+        $out .= '</th>';
+        $out .= '<th scope="col">';
+        $out .= 'Type';
+        $out .= '</th>';
+        $out .= '</tr>';
+        $out .= '</thead>';
+        $out .= '<tbody id="columns">';
+        $out .= '<tr>';
+        $out .= '<th scope="row">';
+        $out .= 'ID';
+        $out .= '<small aria-label="Primary key" role="status">';
+        $out .= '*';
+        $out .= '</small>';
+        $out .= '</th>';
+        $out .= '<td>';
+        $out .= '<label>';
+        $out .= '<input checked disabled type="radio">';
+        $out .= ' ';
+        $out .= '<span>';
+        $out .= 'Integer';
+        $out .= '</span>';
+        $out .= '</label>';
+        $out .= '<br>';
+        $out .= '<label>';
+        $out .= '<input checked disabled type="checkbox">';
+        $out .= ' ';
+        $out .= '<span>';
+        $out .= 'Auto-Increment';
+        $out .= '</span>';
+        $out .= '</label>';
+        $out .= '<br>';
+        $out .= '<label>';
+        $out .= '<input checked disabled type="checkbox">';
+        $out .= ' ';
+        $out .= '<span>';
+        $out .= 'Unique';
+        $out .= '</span>';
+        $out .= '</label>';
+        $out .= '</td>';
+        $out .= '</tr>';
+        $out .= '</tbody>';
+        $out .= '</table>';
+        $out .= '<template id="column">';
+        $out .= '<tr>';
+        $out .= '<th scope="row">';
+        $out .= '<button class="remove" title="Remove Column" type="button">';
+        $out .= '&minus;';
+        $out .= '</button>';
+        $out .= ' ';
+        $out .= '<input name="columns[][key]" placeholder="fooBarBaz" pattern="' . $PATTERN_TABLE_COLUMN . '" required type="text">';
+        $out .= '</th>';
+        $out .= '<td>';
+        $types = [
+            'BLOB' => 'Binary',
+            'NULL' => 'Null',
+            'NUMBER DEFAULT %$1s CHECK(%$2s IN (0, 1))' => 'Boolean',
+            'NUMBER' => 'Integer',
+            'REAL' => 'Float',
+            'TEXT' => 'String'
+        ];
+        foreach ($types as $k => $v) {
+            $out .= '<label>';
+            $out .= '<input' . ('TEXT' === $k ? ' checked' : "") . ' name="columns[][type]" type="radio" value="' . $k . '">';
+            $out .= ' ';
+            $out .= '<span>';
+            $out .= $v;
+            $out .= '</span>';
+            $out .= '</label>';
+        }
+        $out .= '<br>';
+        $out .= '<label>';
+        $out .= '<input name="columns[][rule][AUTOINCREMENT]" type="checkbox">';
+        $out .= ' ';
+        $out .= '<span>';
+        $out .= 'Auto-Increment';
+        $out .= '</span>';
+        $out .= '</label>';
+        $out .= '<br>';
+        $out .= '<label>';
+        $out .= '<input name="columns[][rule][NOT NULL]" type="checkbox">';
+        $out .= ' ';
+        $out .= '<span>';
+        $out .= 'Not Null';
+        $out .= '</span>';
+        $out .= '</label>';
+        $out .= '<br>';
+        $out .= '<label>';
+        $out .= '<input name="columns[][rule][UNIQUE]" type="checkbox">';
+        $out .= ' ';
+        $out .= '<span>';
+        $out .= 'Unique';
+        $out .= '</span>';
+        $out .= '</label>';
+        $out .= '<br>';
+        $out .= '<label>';
+        $out .= '<input name="columns[][rule][DEFAULT]" placeholder="Default" type="text">';
+        $out .= '</label>';
+        $out .= '</td>';
+        $out .= '</tr>';
+        $out .= '</template>';
+        $out .= '<script>';
+        $out .= <<<JS
+const add = document.querySelector('.add');
+const column = document.querySelector('#column');
+const columns = document.querySelector('#columns');
+add.addEventListener('click', addColumn, false);
+let index = 0;
+function addColumn() {
+   let node = column.content.cloneNode(true),
+       remove = node.querySelector('.remove');
+    remove.addEventListener('click', removeColumn, false);
+    node.querySelectorAll('[name*="[]"]').forEach(v => v.name = v.name.replace(/\[\]/g, '[' + index + ']'));
+    columns.appendChild(node);
+    ++index;
+}
+function removeColumn() {
+    this.parentNode.parentNode.remove();
+}
+JS;
+        $out .= '</script>';
+    } else {
+        $out .= '<p>';
+        $out .= 'Please select a table!';
+        $out .= '</p>';
+    }
 }
 
 $out .= '</main>';
 $out .= '<aside>';
 
-$out .= '<h4>';
+$out .= '<h3>';
 $out .= 'Tables';
-$out .= '</h4>';
+$out .= '</h3>';
 
 if ($tables = Base::query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")->get()) {
     $out .= '<ul>';
     foreach ($tables as $table) {
         $out .= '<li>';
         $out .= '<a' . ($table->name === ($_GET['table'] ?? "") ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
+            'chunk' => null,
+            'part' => null,
+            'row' => null,
+            'sort' => null,
             'table' => $table->name,
-            'task' => 'select'
+            'task' => null
         ]) . '">';
         $out .= $table->name;
         $out .= '</a>';
@@ -448,11 +661,20 @@ if ($tables = Base::query("SELECT name FROM sqlite_master WHERE type = 'table' A
     $out .= '</ul>';
 }
 
-$out .= '<p>';
-$out .= '<a href="" role="button">';
-$out .= 'Create';
-$out .= '</a>';
-$out .= '</p>';
+if (!isset($_GET['task'])) {
+    $out .= '<p>';
+    $out .= '<a href="' . $path() . $query([
+        'chunk' => null,
+        'part' => null,
+        'row' => null,
+        'sort' => null,
+        'table' => null,
+        'task' => 'create'
+    ]) . '" role="button">';
+    $out .= 'Create';
+    $out .= '</a>';
+    $out .= '</p>';
+}
 
 $out .= '</aside>';
 $out .= '</form>';
