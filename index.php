@@ -458,19 +458,21 @@ if (!empty($_GET['table'])) {
             $sql = Base::table('sqlite_master')->select('sql')->where('tbl_name', '=', trim($name, '"'))->first()->sql ?? "";
             $sql_columns = substr($sql, strpos($sql, '(') + 1, -1);
             $out .= '<h3>';
-            $out .= 'Edit Row';
+            $out .= 'Update Row #' . $row->{$ID};
             $out .= '</h3>';
+            $out .= '<table>';
+            $out .= '<tbody>';
             foreach ($row as $k => $v) {
                 if ($ID === $k) {
                     continue;
                 }
+                $out .= '<tr>';
+                $out .= '<th scope="row">';
+                $out .= $k;
+                $out .= '</th>';
+                $out .= '<td>';
                 $type = 'TEXT';
                 $default = null;
-                $out .= '<p>';
-                $out .= '<small>';
-                $out .= $k;
-                $out .= '</small>';
-                $out .= '<br>';
                 if ($sql_columns && preg_match('/"' . preg_quote($k) . '"\s+(\w+)(?:\s+DEFAULT\s+(".*?"|[^\s,]+))?/', $sql_columns, $m)) {
                     // var_dump($m);
                     $type = $m[1] ?? 'TEXT';
@@ -500,8 +502,20 @@ if (!empty($_GET['table'])) {
                     $out .= $vv;
                     $out .= '</textarea>';
                 }
-                $out .= '</p>';
+                $out .= '</td>';
+                $out .= '</tr>';
             }
+            $out .= '</tbody>';
+            $out .= '</table>';
+            $out .= '<p>';
+            $out .= '<button name="task" type="submit" value="update">';
+            $out .= 'Save';
+            $out .= '</button>';
+            $out .= ' ';
+            $out .= '<button name="task" type="submit" value="delete">';
+            $out .= 'Delete';
+            $out .= '</button>';
+            $out .= '</p>';
         }
     } else if ($table = Base::query('PRAGMA table_info(' . $name . ')')->get()) {
         $fields = [];
