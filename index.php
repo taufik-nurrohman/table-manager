@@ -34,7 +34,7 @@ array_walk_recursive($any, static function(&$v) use($values) {
 // - Treat table column name as class property (camel case)
 
 $FILE = __DIR__ . '/table.db';
-$ID = 'ID';
+$ID = 'ID'; // Primary column
 $PATTERN_TABLE = "^[A-Z][a-z\\d]*(?:_?[A-Z\\d][a-z\\d]*)*$";
 $PATTERN_TABLE_COLUMN = "^[A-Za-z][A-Za-z\\d]*(?:_?[A-Za-z\\d][a-z\\d]*)*$";
 $SESSION = 'STATUS';
@@ -114,7 +114,7 @@ $query = static function(array $alter = []) {
     return "" !== $q ? '?' . $q : "";
 };
 
-$valid = static function(string $value) {
+$stringify = static function(string $value) {
     return '"' . strip_tags(strtr($value, ['"' => '""'])) . '"';
 };
 
@@ -129,6 +129,67 @@ try {
     ], 'Base');
 } catch (Exception $e) {
     echo ($_SESSION[$SESSION] = strtr($e->getMessage(), ["\n" => '<br>']));
+    exit;
+}
+
+if ('POST' === $_SERVER['REQUEST_METHOD']) {
+    if (isset($_POST['drop'])) {
+        Base::query('DROP TABLE ' . $stringify($table = $_POST['drop']))->get();
+        if ($errors = Base::pdo()->errorInfo()) {
+            if ('00000' === $errors[0]) {
+                $_SESSION[$SESSION] = 'Dropped table <code>' . $table . '</code>.';
+                header('location: ' . $path());
+                exit;
+            }
+            $_SESSION[$SESSION] = 'Could not drop table <code>' . $table . '</code>.';
+            foreach ($errors as $k => $v) {
+                $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
+            }
+        }
+        header('location: ' . $path());
+        exit;
+    }
+    if ('create' === $_POST['task']) {
+        $columns = [];
+        foreach ($_POST['columns'] ?? [] as $k => $v) {
+            $rules = "";
+            $key = $v['key'];
+            $type = sprintf($v['type'], $v['rule']['DEFAULT'] ?? 'NULL', $stringify($key));
+            foreach ($v['rule'] ?? [] as $kk => $vv) {
+                if (false !== strpos($type, ' ' . $kk)) {
+                    continue;
+                }
+                if ('DEFAULT' === $kk) {
+                    if ("" === $vv || 'NULL' === $vv) {
+                        continue;
+                    }
+                    $rules .= ' DEFAULT ' . ('CURRENT_DATE' === $vv || 'CURRENT_TIME' === $vv || 'CURRENT_TIMESTAMP' === $vv || is_numeric($vv) ? $vv : $stringify($vv));
+                } else {
+                    $rules .= ' ' . $kk;
+                }
+            }
+            $columns[$key] = trim($stringify($key) . ' ' . $type . $rules);
+        }
+        $stmt = 'CREATE TABLE ' . $stringify($table = $_POST['table']);
+        $columns[$ID] = '"' . $ID . '" INTEGER PRIMARY KEY'; // `ID` column is hard-coded
+        ksort($columns);
+        $stmt .= ' (' . implode(', ', $columns) . ')';
+        Base::query($stmt)->get();
+        if ($errors = Base::pdo()->errorInfo()) {
+            if ('00000' === $errors[0]) {
+                $_SESSION[$SESSION] = 'Created table <code>' . $table . '</code>.';
+                header('location: ' . $path());
+                exit;
+            }
+            $_SESSION['status'] = 'Could not create table <code>' . $table . '</code>.';
+            foreach ($errors as $k => $v) {
+                $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
+            }
+        }
+        header('location: ' . $path());
+        exit;
+    }
+    header('location: ' . $path());
     exit;
 }
 
@@ -186,6 +247,7 @@ select:focus {
   outline: 1px solid #00f;
 }
 code {
+  color: #909;
   font-family: monospace;
 }
 i {
@@ -202,6 +264,7 @@ textarea {
   font-weight: normal;
   padding: .25em .5em;
   vertical-align: middle;
+  width: 15em;
 }
 input[type='checkbox'],
 input[type='radio'] {
@@ -290,8 +353,8 @@ th {
   background: #fed;
 }
 [role='alert'] {
-  background: #ff0;
-  padding: .35em .5em;
+  background: #fe9;
+  padding: .5em .75em;
 }
 [role='status'] {
   color: #f00;
@@ -338,9 +401,29 @@ main {
 [hidden] {
   display: none !important;
 }
+tr[data-type="BLOB"] .column-rule\:default,
+tr[data-type="BLOB"] .column-rule\:default + br {
+  display: none;
+}
+tr[data-type="BOOLEAN"] .column-rule\:not-null,
+tr[data-type="BOOLEAN"] .column-rule\:not-null + br,
+tr[data-type="BOOLEAN"] .column-rule\:unique,
+tr[data-type="BOOLEAN"] .column-rule\:unique + br {
+  display: none;
+}
+tr[data-type="NULL"] .column-rule\:default,
+tr[data-type="NULL"] .column-rule\:default + br,
+tr[data-type="NULL"] .column-rule\:not-null,
+tr[data-type="NULL"] .column-rule\:not-null + br,
+tr[data-type="NULL"] .column-rule\:unique,
+tr[data-type="NULL"] .column-rule\:unique + br {
+  display: none;
+}
 CSS;
 
 $title = 'SQLite Table Manager';
+
+http_response_code(200);
 
 $out  = '<!DOCTYPE html>';
 $out .= '<html dir="ltr">';
@@ -356,14 +439,74 @@ $out .= $style;
 $out .= '</style>';
 $out .= '</head>';
 $out .= '<body>';
+
+if (!empty($_SESSION[$SESSION])) {
+    $out .= '<p role="alert">';
+    $out .= $_SESSION[$SESSION];
+    $out .= '</p>';
+}
+
 $out .= '<form action="' . $path() . '" enctype="multipart/form-data" method="post">';
 $out .= '<main>';
 
 if (!empty($_GET['table'])) {
-    if ($table = Base::query('PRAGMA table_info("' . ($name = strtr($_GET['table'], ['"' => '""'])) . '")')->get()) {
+    $name = $stringify($_GET['table']);
+    if ('insert' === ($_GET['task'] ?? 0)) {
+        $out .= '<b>TODO:</b> Add insert form.';
+    } else if (array_key_exists('row', $_GET)) {
+        if ($row = Base::table(trim($name, '"'))->find($_GET['row'] ?? 0, $ID)) {
+            $sql = Base::table('sqlite_master')->select('sql')->where('tbl_name', '=', trim($name, '"'))->first()->sql ?? "";
+            $sql_columns = substr($sql, strpos($sql, '(') + 1, -1);
+            $out .= '<h3>';
+            $out .= 'Edit Row';
+            $out .= '</h3>';
+            foreach ($row as $k => $v) {
+                if ($ID === $k) {
+                    continue;
+                }
+                $type = 'TEXT';
+                $default = null;
+                $out .= '<p>';
+                $out .= '<small>';
+                $out .= $k;
+                $out .= '</small>';
+                $out .= '<br>';
+                if ($sql_columns && preg_match('/"' . preg_quote($k) . '"\s+(\w+)(?:\s+DEFAULT\s+(".*?"|[^\s,]+))?/', $sql_columns, $m)) {
+                    // var_dump($m);
+                    $type = $m[1] ?? 'TEXT';
+                }
+                $vv = htmlspecialchars($v);
+                if ('BLOB' === $type) {
+                    $out .= '<input name="x" type="file">';
+                } else if ('BOOLEAN' === $type) {
+                    $out .= '<label>';
+                    $out .= '<input' . (0 === $v ? ' checked' : "") . ' name="x" type="radio" value="0">';
+                    $out .= ' ';
+                    $out .= '<span>';
+                    $out .= 'No';
+                    $out .= '</span>';
+                    $out .= '</label>';
+                    $out .= '<label>';
+                    $out .= '<input' . (1 === $v ? ' checked' : "") . ' name="x" type="radio" value="1">';
+                    $out .= ' ';
+                    $out .= '<span>';
+                    $out .= 'Yes';
+                    $out .= '</span>';
+                    $out .= '</label>';
+                } else if ('INTEGER' === $type) {
+                    $out .= '<input name="x" type="number" placeholder="' . $vv . '" value="' . $vv . '">';
+                } else {
+                    $out .= '<textarea name="x" placeholder="' . explode("\n", $vv)[0] . '">';
+                    $out .= $vv;
+                    $out .= '</textarea>';
+                }
+                $out .= '</p>';
+            }
+        }
+    } else if ($table = Base::query('PRAGMA table_info(' . $name . ')')->get()) {
         $fields = [];
         $columns = count((array) $table);
-        $rows = Base::table($name)->count();
+        $rows = Base::table(trim($name, '"'))->count();
         $out .= '<p role="status">';
         $out .= '<span id="table-columns">' . $columns . '</span> Column' . (1 === $columns ? "" : 's');
         $out .= ', ';
@@ -375,9 +518,9 @@ if (!empty($_GET['table'])) {
 
         foreach ($table as $v) {
             if ($ID !== ($n = $v->name)) {
-                $fields[] = 'SUBSTR(' . $valid($n) . ', 1, ' . $TRUNCATE . ') AS ' . $valid($n);
+                $fields[] = 'SUBSTR(' . $stringify($n) . ', 1, ' . $TRUNCATE . ') AS ' . $stringify($n);
             } else {
-                $fields[] = $valid($n);
+                $fields[] = $stringify($n);
             }
             $out .= '<th>';
             $out .= '<a' . ($n === ($_GET['sort'][1] ?? $ID) ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
@@ -407,11 +550,21 @@ if (!empty($_GET['table'])) {
             $out .= '</tr>';
         } else {
             sort($fields);
-            $rows = Base::query('SELECT ' . implode(', ', $fields) . ' FROM ' . $valid($name) . ' ORDER BY ' . $valid($_GET['sort'][1] ?? $ID) . ' ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? 20) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
+            $rows = Base::query('SELECT ' . implode(', ', $fields) . ' FROM ' . $name . ' ORDER BY ' . $stringify($_GET['sort'][1] ?? $ID) . ' ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? 20) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
             foreach ($rows as $row) {
                 $out .= '<tr>';
                 foreach ($row as $k => $v) {
                     $out .= '<td>';
+                    if ($ID === $k) {
+                        $out .= '<a href="' . $path() . $query([
+                            'chunk' => null,
+                            'part' => null,
+                            'row' => $v,
+                            'sort' => null,
+                            'table' => $_GET['table'],
+                            'task' => null
+                        ]) . '">';
+                    }
                     if (null === $v) {
                         $out .= '<i aria-label="Null value" role="status">';
                         $out .= 'NULL';
@@ -422,6 +575,9 @@ if (!empty($_GET['table'])) {
                         $out .= '</i>';
                     }
                     $out .= $TRUNCATE === strlen($v) ? htmlspecialchars($v) . '&hellip;' : htmlspecialchars($v);
+                    if ($ID === $k) {
+                        $out .= '</a>';
+                    }
                     $out .= '</td>';
                 }
                 $out .= '</tr>';
@@ -431,7 +587,7 @@ if (!empty($_GET['table'])) {
         $out .= '</tbody>';
         $out .= '</table>';
 
-        $the_pager = $pager($_GET['part'] ?? 1, Base::table($name)->count(), $_GET['chunk'] ?? 20, 2, static function($part) use($ID, $path, $query) {
+        $the_pager = $pager($_GET['part'] ?? 1, Base::table(trim($name, '"'))->count(), $_GET['chunk'] ?? 20, 2, static function($part) use($ID, $path, $query) {
             return $path() . strtr($query([
                 'chunk' => $_GET['chunk'] ?? 20,
                 'part' => $part,
@@ -446,7 +602,18 @@ if (!empty($_GET['table'])) {
         }
 
         $out .= '<p>';
-        $out .= '<button name="drop" type="submit" value=' . $valid($_GET['table']) . '>';
+        $out .= '<a href="' . $path() . $query([
+            'chunk' => null,
+            'part' => null,
+            'row' => null,
+            'sort' => null,
+            'table' => trim($name, '"'),
+            'task' => 'insert'
+        ]) . '" role="button">';
+        $out .= 'Insert';
+        $out .= '</a>';
+        $out .= ' ';
+        $out .= '<button disabled name="drop" type="submit" value=' . $name . '>';
         $out .= 'Drop';
         $out .= '</button>';
         $out .= '</p>';
@@ -455,6 +622,7 @@ if (!empty($_GET['table'])) {
 const drop = document.querySelector('button[name=drop]');
 const tableColumns = document.querySelector('#table-columns').textContent.trim();
 const tableRows = document.querySelector('#table-rows').textContent.trim();
+drop.disabled = false;
 drop.addEventListener('click', dropTable, false);
 function dropTable(e) {
     if (window.confirm('Dropping a table is a dangerous action. We need to confirm that you consciously want to do so.')) {
@@ -468,12 +636,15 @@ function dropTable(e) {
                 if ("" !== columns && columns === tableColumns) {
                     // Pass!
                 } else {
+                    window.alert('Wrong answer.');
                     e.preventDefault();
                 }
             } else {
+                window.alert('Wrong answer.');
                 e.preventDefault();
             }
         } else {
+            window.alert('Wrong answer.');
             e.preventDefault();
         }
     } else {
@@ -484,8 +655,9 @@ JS;
         $out .= '</script>';
 
     } else {
+        http_response_code(404);
         $out .= '<p>';
-        $out .= 'Table <code>' . $name . '</code> does not exist.';
+        $out .= 'Table <code>' . trim($name, '"') . '</code> does not exist.';
         $out .= '</p>';
     }
 } else {
@@ -498,9 +670,9 @@ JS;
         $out .= '<label for="' . ($id = 'f:' . substr(uniqid(), 6)) . '">';
         $out .= 'Name';
         $out .= '</label>';
-        $out .= '<input autofocus id="' . $id . '" name="table" placeholder="FooBarBaz" pattern="' . $PATTERN_TABLE . '" required type="text">';
+        $out .= '<input autofocus class="table" id="' . $id . '" name="table" placeholder="FooBarBaz" pattern="' . $PATTERN_TABLE . '" required type="text">';
         $out .= ' ';
-        $out .= '<button class="add" title="Add Column" type="button">';
+        $out .= '<button class="add" disabled title="Add Column" type="button">';
         $out .= '&plus;';
         $out .= '</button>';
         $out .= '<table>';
@@ -515,7 +687,7 @@ JS;
         $out .= '</tr>';
         $out .= '</thead>';
         $out .= '<tbody id="columns">';
-        $out .= '<tr>';
+        $out .= '<tr data-type="INTEGER">';
         $out .= '<th scope="row">';
         $out .= 'ID';
         $out .= '<small aria-label="Primary key" role="status">';
@@ -523,7 +695,7 @@ JS;
         $out .= '</small>';
         $out .= '</th>';
         $out .= '<td>';
-        $out .= '<label>';
+        $out .= '<label class="column-type:integer">';
         $out .= '<input checked disabled type="radio">';
         $out .= ' ';
         $out .= '<span>';
@@ -531,27 +703,24 @@ JS;
         $out .= '</span>';
         $out .= '</label>';
         $out .= '<br>';
-        $out .= '<label>';
+        $out .= '<label class="column-rule:primary-key">';
         $out .= '<input checked disabled type="checkbox">';
         $out .= ' ';
         $out .= '<span>';
-        $out .= 'Auto-Increment';
-        $out .= '</span>';
-        $out .= '</label>';
-        $out .= '<br>';
-        $out .= '<label>';
-        $out .= '<input checked disabled type="checkbox">';
-        $out .= ' ';
-        $out .= '<span>';
-        $out .= 'Unique';
+        $out .= 'Primary Key';
         $out .= '</span>';
         $out .= '</label>';
         $out .= '</td>';
         $out .= '</tr>';
         $out .= '</tbody>';
         $out .= '</table>';
+        $out .= '<p>';
+        $out .= '<button class="create" disabled name="task" type="submit" value="create">';
+        $out .= 'Create';
+        $out .= '</button>';
+        $out .= '</p>';
         $out .= '<template id="column">';
-        $out .= '<tr>';
+        $out .= '<tr data-type="TEXT">';
         $out .= '<th scope="row">';
         $out .= '<button class="remove" title="Remove Column" type="button">';
         $out .= '&minus;';
@@ -563,13 +732,14 @@ JS;
         $types = [
             'BLOB' => 'Binary',
             'NULL' => 'Null',
-            'NUMBER DEFAULT %$1s CHECK(%$2s IN (0, 1))' => 'Boolean',
+            'BOOLEAN DEFAULT 0 CHECK(%2$s IN (0, 1))' => 'Boolean',
             'NUMBER' => 'Integer',
             'REAL' => 'Float',
             'TEXT' => 'String'
         ];
+        asort($types);
         foreach ($types as $k => $v) {
-            $out .= '<label>';
+            $out .= '<label class="column-type:' . strtolower(explode(' ', $k)[0]) . '">';
             $out .= '<input' . ('TEXT' === $k ? ' checked' : "") . ' name="columns[][type]" type="radio" value="' . $k . '">';
             $out .= ' ';
             $out .= '<span>';
@@ -578,15 +748,7 @@ JS;
             $out .= '</label>';
         }
         $out .= '<br>';
-        $out .= '<label>';
-        $out .= '<input name="columns[][rule][AUTOINCREMENT]" type="checkbox">';
-        $out .= ' ';
-        $out .= '<span>';
-        $out .= 'Auto-Increment';
-        $out .= '</span>';
-        $out .= '</label>';
-        $out .= '<br>';
-        $out .= '<label>';
+        $out .= '<label class="column-rule:not-null">';
         $out .= '<input name="columns[][rule][NOT NULL]" type="checkbox">';
         $out .= ' ';
         $out .= '<span>';
@@ -594,7 +756,7 @@ JS;
         $out .= '</span>';
         $out .= '</label>';
         $out .= '<br>';
-        $out .= '<label>';
+        $out .= '<label class="column-rule:unique">';
         $out .= '<input name="columns[][rule][UNIQUE]" type="checkbox">';
         $out .= ' ';
         $out .= '<span>';
@@ -602,7 +764,7 @@ JS;
         $out .= '</span>';
         $out .= '</label>';
         $out .= '<br>';
-        $out .= '<label>';
+        $out .= '<label class="column-rule:default">';
         $out .= '<input name="columns[][rule][DEFAULT]" placeholder="Default" type="text">';
         $out .= '</label>';
         $out .= '</td>';
@@ -613,7 +775,11 @@ JS;
 const add = document.querySelector('.add');
 const column = document.querySelector('#column');
 const columns = document.querySelector('#columns');
+const create = document.querySelector('.create');
+const table = document.querySelector('.table');
 add.addEventListener('click', addColumn, false);
+table.addEventListener('input', onChangeValue, false);
+table.addEventListener('keydown', onChangeValue, false);
 let index = 0;
 function addColumn() {
    let node = column.content.cloneNode(true),
@@ -621,7 +787,20 @@ function addColumn() {
     remove.addEventListener('click', removeColumn, false);
     node.querySelectorAll('[name*="[]"]').forEach(v => v.name = v.name.replace(/\[\]/g, '[' + index + ']'));
     columns.appendChild(node);
+    node = columns.querySelector('tr:last-child th input[type="text"]');
+    node.addEventListener('input', onChangeValue, false);
+    node.addEventListener('keydown', onChangeValue, false);
+    node.focus();
+    columns.querySelectorAll('tr:last-child td input[type="radio"]').forEach(v => v.addEventListener('change', onChangeType, false));
+    create.disabled = true;
     ++index;
+}
+function onChangeType() {
+    let type = this.value.split(/\s+/)[0];
+    this.closest('tr').dataset.type = type;
+}
+function onChangeValue() {
+    add.disabled = create.disabled = !this.validity.valid;
 }
 function removeColumn() {
     this.parentNode.parentNode.remove();
@@ -630,7 +809,13 @@ JS;
         $out .= '</script>';
     } else {
         $out .= '<p>';
-        $out .= 'Please select a table!';
+        $out .= 'Please select a table, or create a new one!';
+        $out .= '</p>';
+        $out .= '<hr>';
+        $out .= '<p>';
+        $out .= '<small>';
+        $out .= '&copy; 2022 &middot; <a href="https://github.com/taufik-nurrohman" target="_blank">SQLite Table Manager</a>';
+        $out .= '</small>';
         $out .= '</p>';
     }
 }
@@ -683,46 +868,14 @@ $out .= '</html>';
 
 echo $out;
 
+unset($_SESSION[$SESSION]);
+
 exit;
 
 if ('POST' === $_SERVER['REQUEST_METHOD']) {
     $table = $_POST['table'] ?? null;
     $task = $_POST['task'] ?? null;
     if ('create' === $task) {
-        $keys = [];
-        foreach ($_POST['keys']['key'] ?? [] as $k => $v) {
-            $rules = "";
-            foreach ($_POST['keys']['rules'][$k] ?? [] as $kk => $vv) {
-                $rules .= ' ' . $kk;
-            }
-            $chops = explode(' ', strtr($_POST['keys']['type'][$k] ?? 'TEXT', [
-                ':default' => $_POST['keys']['value'][$k] ?? 'NULL',
-                ':key' => $v
-            ]), 2);
-            $keys[$v] = trim($chops[0] . $rules . ' ' . ($chops[1] ?? ""));
-        }
-        $stmt = 'CREATE TABLE "' . strtr($table, ['"' => '""']) . '"';
-        $keys['ID'] = 'INTEGER PRIMARY KEY AUTOINCREMENT'; // `ID` column is hard-coded
-        $data = [];
-        foreach ($keys as $k => $v) {
-            $data[$k] = trim('"' . strtr($k, ['"' => '""']) . '" ' . $v);
-        }
-        ksort($data);
-        $stmt .= ' (' . implode(', ', $data) . ')';
-        Base::query($stmt)->get();
-        if ($errors = Base::pdo()->errorInfo()) {
-            if ('00000' === $errors[0]) {
-                $_SESSION['status'] = 'Created table <code>' . $table . '</code>.';
-                header('location: ' . $path);
-                exit;
-            }
-            $_SESSION['status'] = 'Could not create table <code>' . $table . '</code>.';
-            foreach ($errors as $k => $v) {
-                $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
-            }
-        }
-        header('location: ' . $path . query());
-        exit;
     }
     if ('insert' === $task) {
         $values = [];
@@ -781,20 +934,6 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         }
     }
     if (isset($_POST['drop'])) {
-        Base::query('DROP TABLE "' . strtr($table = $_POST['drop'], ['"' => '""']) . '"')->get();
-        if ($errors = Base::pdo()->errorInfo()) {
-            if ('00000' === $errors[0]) {
-                $_SESSION['status'] = 'Dropped table <code>' . $table . '</code>.';
-                header('location: ' . $path);
-                exit;
-            }
-            $_SESSION['status'] = 'Could not drop table <code>' . $table . '</code>.';
-            foreach ($errors as $k => $v) {
-                $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
-            }
-        }
-        header('location: ' . $path);
-        exit;
     }
     if (isset($_POST['select'])) {
         header('location: ' . $path . query([
@@ -878,7 +1017,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
 
                   $types = [
                       'BLOB' => 'Binary',
-                      'INTEGER DEFAULT 0 CHECK (:key IN (0, 1))' => 'Boolean',
+                      'BOOLEAN DEFAULT 0 CHECK (%s IN (0, 1))' => 'Boolean',
                       'INTEGER' => 'Integer',
                       'NULL' => 'Null',
                       'REAL' => 'Float',
