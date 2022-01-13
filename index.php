@@ -20,7 +20,6 @@ $values = [
 ];
 
 array_walk_recursive($any, static function(&$v) use($values) {
-    // Trim white-space and normalize line-break
     $v = trim(strtr($v, ["\r\n" => "\n", "\r" => "\n"]));
     if (is_numeric($v)) {
         $v = false !== strpos($v, '.') ? (float) $v : (int) $v;
@@ -29,12 +28,7 @@ array_walk_recursive($any, static function(&$v) use($values) {
     }
 });
 
-// Naming best practice(s):
-// - Treat table name as PHP class (pascal case)
-// - Treat table column name as class property (camel case)
-
 $FILE = __DIR__ . '/table.db';
-$ID = 'ID'; // Primary column
 $PATTERN_TABLE = "^[A-Z][a-z\\d]*(?:_?[A-Z\\d][a-z\\d]*)*$";
 $PATTERN_TABLE_COLUMN = "^[A-Za-z][A-Za-z\\d]*(?:_?[A-Za-z\\d][a-z\\d]*)*$";
 $SESSION = 'STATUS';
@@ -114,12 +108,13 @@ $query = static function(array $alter = []) {
     return "" !== $q ? '?' . $q : "";
 };
 
-$stringify = static function(string $value) {
-    return '"' . strip_tags(strtr($value, ['"' => '""'])) . '"';
+$stringify = static function($value) {
+    $value = strip_tags(strtr($value ?? "", ['"' => '""']));
+    return "" !== $value ? '"' . $value . '"' : 'NULL';
 };
 
 if (!is_file($FILE)) {
-    $_SESSION[$SESSION] = 'Table does not exist. Automatically create a table for you.';
+    $_SESSION[$SESSION][] = 'Table does not exist. Automatically create a table for you.';
 }
 
 try {
@@ -128,65 +123,132 @@ try {
         'driver' => 'sqlite'
     ], 'Base');
 } catch (Exception $e) {
-    echo ($_SESSION[$SESSION] = strtr($e->getMessage(), ["\n" => '<br>']));
+    echo ($_SESSION[$SESSION][] = strtr($e->getMessage(), ["\n" => '<br>']));
     exit;
 }
 
 if ('POST' === $_SERVER['REQUEST_METHOD']) {
     if (isset($_POST['drop'])) {
-        Base::query('DROP TABLE ' . $stringify($table = $_POST['drop']))->get();
-        if ($errors = Base::pdo()->errorInfo()) {
-            if ('00000' === $errors[0]) {
-                $_SESSION[$SESSION] = 'Dropped table <code>' . $table . '</code>.';
-                header('location: ' . $path());
-                exit;
-            }
-            $_SESSION[$SESSION] = 'Could not drop table <code>' . $table . '</code>.';
-            foreach ($errors as $k => $v) {
-                $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
-            }
+        try {
+            Base::query($stmt = 'DROP TABLE ' . $stringify($table = $_POST['drop']))->get();
+            $_SESSION[$SESSION][] = 'Dropped table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+        } catch (Exception $e) {
+            $_SESSION[$SESSION][] = 'Could not drop table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
         }
         header('location: ' . $path());
         exit;
     }
-    if ('create' === $_POST['task']) {
+    $task = $_POST['task'] ?? 0;
+    if (empty($task)) {
+        $_SESSION[$SESSION][] = 'Unknown task.';
+        header('location: ' . $path());
+        exit;
+    }
+    if ('create' === $task) {
         $columns = [];
         foreach ($_POST['columns'] ?? [] as $k => $v) {
             $rules = "";
             $key = $v['key'];
-            $type = sprintf($v['type'], $v['rule']['DEFAULT'] ?? 'NULL', $stringify($key));
+            $type = $v['type'];
+            $value = $v['value'];
             foreach ($v['rule'] ?? [] as $kk => $vv) {
-                if (false !== strpos($type, ' ' . $kk)) {
-                    continue;
-                }
-                if ('DEFAULT' === $kk) {
-                    if ("" === $vv || 'NULL' === $vv) {
-                        continue;
-                    }
-                    $rules .= ' DEFAULT ' . ('CURRENT_DATE' === $vv || 'CURRENT_TIME' === $vv || 'CURRENT_TIMESTAMP' === $vv || is_numeric($vv) ? $vv : $stringify($vv));
-                } else {
-                    $rules .= ' ' . $kk;
-                }
+                $rules .= ' ' . $kk;
             }
-            $columns[$key] = trim($stringify($key) . ' ' . $type . $rules);
+            $columns[$key] = trim($stringify($key) . ' ' . $type . ("" !== $value && 'NULL' !== $value ? ' DEFAULT ' . ('CURRENT_DATE' === $value || 'CURRENT_TIME' === $value || 'CURRENT_TIMESTAMP' === $value || is_numeric($value) ? $value : $stringify($value)) : "") . $rules);
         }
         $stmt = 'CREATE TABLE ' . $stringify($table = $_POST['table']);
-        $columns[$ID] = '"' . $ID . '" INTEGER PRIMARY KEY'; // `ID` column is hard-coded
-        ksort($columns);
-        $stmt .= ' (' . implode(', ', $columns) . ')';
-        Base::query($stmt)->get();
-        if ($errors = Base::pdo()->errorInfo()) {
-            if ('00000' === $errors[0]) {
-                $_SESSION[$SESSION] = 'Created table <code>' . $table . '</code>.';
-                header('location: ' . $path());
-                exit;
+        if ($columns) {
+            ksort($columns);
+            $keys = [];
+            foreach ($_POST['primary'] ?? [] as $k => $v) {
+                $keys[] = $stringify($k);
             }
-            $_SESSION['status'] = 'Could not create table <code>' . $table . '</code>.';
-            foreach ($errors as $k => $v) {
-                $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
-            }
+            $primary = $keys ? ', PRIMARY KEY(' . implode(', ', $keys) . ')' : "";
+            $stmt .= ' (' . implode(', ', $columns) . $primary . ')';
         }
-        header('location: ' . $path());
+        try {
+            Base::query($stmt)->get();
+            $_SESSION[$SESSION][] = 'Created table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+        } catch (Exception $e) {
+            $_SESSION[$SESSION][] = 'Could not create table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+        }
+        header('location: ' . $path() . $query([
+            'chunk' => null,
+            'part' => null,
+            'row' => null,
+            'sort' => null,
+            'table' => $table,
+            'task' => null
+        ]));
+        exit;
+    } else if ('delete' === $task) {
+        try {
+            Base::query($stmt = 'DELETE FROM ' . $stringify($table = $_POST['table']) . ' WHERE "rowid" = ' . ($row = $_POST['row']))->get();
+            $_SESSION[$SESSION][] = 'Deleted 1 row with ID <code>' . $row . '</code> from table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+        } catch (Exception $e) {
+            $_SESSION[$SESSION][] = 'Could not delete row with ID <code>' . $row . '</code> from table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+        }
+        header('location: ' . $path() . $query([
+            'chunk' => null,
+            'part' => null,
+            'row' => null,
+            'sort' => null,
+            'table' => $table,
+            'task' => null
+        ]));
+        exit;
+    } else if ('insert' === $task) {
+        try {
+            $keys = $values = [];
+            foreach ($_POST['values'] ?? [] as $k => $v) {
+                $keys[] = $stringify($k);
+                $values[] = is_numeric($v) ? $v : $stringify($v);
+            }
+            $stmt = 'INSERT INTO ' . $stringify($table = $_POST['table']) . ' (' . implode(', ', $keys) . ') VALUES (' . implode(', ', $values) . ')';
+            Base::query($stmt)->get();
+            $_SESSION[$SESSION][] = 'Inserted 1 row to table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+        } catch (Exception $e) {
+            $_SESSION[$SESSION][] = 'Could not insert row to table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+        }
+        header('location: ' . $path() . $query([
+            'chunk' => null,
+            'part' => null,
+            'row' => null,
+            'sort' => null,
+            'table' => $table,
+            'task' => null
+        ]));
+        exit;
+    } else if ('update' === $task) {
+        try {
+            $values = [];
+            foreach ($_POST['values'] ?? [] as $k => $v) {
+                $values[] = $stringify($k) . ' = ' . (is_numeric($v) ? $v : $stringify($v));
+            }
+            $stmt = 'UPDATE ' . $stringify($table = $_POST['table']) . ' SET ' . implode(', ', $values) . ' WHERE "rowid" = ' . ($row = $_POST['row']);
+            Base::query($stmt)->get();
+            $_SESSION[$SESSION][] = 'Updated 1 row with ID <code>' . $row . '</code> in table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+        } catch (Exception $e) {
+            $_SESSION[$SESSION][] = 'Could not update row with ID <code>' . $row . '</code> in table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+        }
+        header('location: ' . $path() . $query([
+            'chunk' => null,
+            'part' => null,
+            'row' => null,
+            'sort' => null,
+            'table' => $table,
+            'task' => null
+        ]));
         exit;
     }
     header('location: ' . $path());
@@ -228,6 +290,21 @@ th {
   font-weight: bold;
 }
 a[role='button'],
+button,
+input,
+select,
+textarea {
+  position: relative;
+  z-index: 1;
+}
+a[role='button']:focus,
+button:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  z-index: 10;
+}
+a[role='button'],
 button {
   background: #def;
   border: 2px solid #000;
@@ -260,16 +337,23 @@ select,
 textarea {
   background: #fff;
   border: 2px solid #000;
+  position: relative;
   display: inline-block;
+  font-family: monospace;
   font-weight: normal;
   padding: .25em .5em;
   vertical-align: middle;
-  width: 15em;
+  width: 8em;
+}
+textarea {
+  width: 100%;
 }
 input[type='checkbox'],
 input[type='radio'] {
   appearance: none;
   border: 2px solid;
+  box-shadow: inset 0 0 0 3px #fff;
+  cursor: pointer;
   display: inline-block;
   font-weight: normal;
   height: 1em;
@@ -280,15 +364,22 @@ input[type='radio'] {
 }
 input[type='checkbox']:focus,
 input[type='radio']:focus {
-  outline: 0;
+  border-color: #00f;
 }
 input[type='checkbox']:checked,
 input[type='radio']:checked {
+  background: #000;
+}
+input[type='checkbox']:checked:focus,
+input[type='radio']:checked:focus {
   background: #00f;
-  box-shadow: inset 0 0 0 3px #fff;
 }
 input[type='radio'] {
   border-radius: 100%;
+}
+button + input[type='text'],
+input[type='text'] + button {
+  margin-left: -2px;
 }
 label {
   cursor: pointer;
@@ -302,10 +393,6 @@ label + input {
 label > input + span {
   display: inline-block;
   vertical-align: middle;
-}
-label > input[type='checkbox']:focus + span,
-label > input[type='radio']:focus + span {
-  color: #00f;
 }
 label > input[type='text'] {
   border: 0;
@@ -342,10 +429,13 @@ table {
   table-layout: auto;
   width: 100%;
 }
+tbody:empty + tfoot {
+  display: none;
+  }
 td,
 th {
   border: 1px solid;
-  padding: .25em .5em;
+  padding: .5em;
   text-align: left;
   vertical-align: top;
 }
@@ -394,25 +484,12 @@ main {
   opacity: .5;
 }
 :focus:invalid {
-  border-color: #f00;
   color: #f00;
   outline-color: #f00;
 }
 [hidden] {
   display: none !important;
 }
-tr[data-type="BLOB"] .column-rule\:default,
-tr[data-type="BLOB"] .column-rule\:default + br {
-  display: none;
-}
-tr[data-type="BOOLEAN"] .column-rule\:not-null,
-tr[data-type="BOOLEAN"] .column-rule\:not-null + br,
-tr[data-type="BOOLEAN"] .column-rule\:unique,
-tr[data-type="BOOLEAN"] .column-rule\:unique + br {
-  display: none;
-}
-tr[data-type="NULL"] .column-rule\:default,
-tr[data-type="NULL"] .column-rule\:default + br,
 tr[data-type="NULL"] .column-rule\:not-null,
 tr[data-type="NULL"] .column-rule\:not-null + br,
 tr[data-type="NULL"] .column-rule\:unique,
@@ -441,9 +518,11 @@ $out .= '</head>';
 $out .= '<body>';
 
 if (!empty($_SESSION[$SESSION])) {
-    $out .= '<p role="alert">';
-    $out .= $_SESSION[$SESSION];
-    $out .= '</p>';
+    foreach ((array) $_SESSION[$SESSION] as $v) {
+        $out .= '<p role="alert">';
+        $out .= $v;
+        $out .= '</p>';
+    }
 }
 
 $out .= '<form action="' . $path() . '" enctype="multipart/form-data" method="post">';
@@ -451,70 +530,101 @@ $out .= '<main>';
 
 if (!empty($_GET['table'])) {
     $name = $stringify($_GET['table']);
+    $columns = Base::query('PRAGMA table_info(' . $name . ')')->get();
     if ('insert' === ($_GET['task'] ?? 0)) {
-        $out .= '<b>TODO:</b> Add insert form.';
+        $out .= '<table>';
+        $out .= '<tbody>';
+        $first = true;
+        foreach ($columns as $k => $v) {
+            if (!empty($v->pk)) {
+                continue;
+            }
+            $d = $v->dflt_value ?? "";
+            $n = $v->name;
+            $t = $v->type;
+            $out .= '<tr>';
+            $out .= '<th scope="row">';
+            $out .= $n;
+            $out .= '</th>';
+            $out .= '<td>';
+            if ('BLOB' === $t) {
+                $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" type="file">';
+            } else if ('INTEGER' === $t) {
+                $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '" step="1" type="number">';
+            } else if ("" === $t || 'NULL' === $t) {
+                $out .= '<code>';
+                $out .= 'NULL';
+                $out .= '</code>';
+            } else if ('REAL' === $t) {
+                $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '" step="0.01" type="number">';
+            } else {
+                $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '">';
+                $out .= '</textarea>';
+            }
+            $out .= '</td>';
+            $out .= '</tr>';
+            $first = false;
+        }
+        $out .= '</tbody>';
+        $out .= '</table>';
+        $out .= '<p>';
+        $out .= '<button name="task" type="submit" value="insert">';
+        $out .= 'Insert';
+        $out .= '</button>';
+        $out .= '</p>';
+        $out .= '<input name="table" type="hidden" value=' . $stringify($_GET['table']) . '>';
     } else if (array_key_exists('row', $_GET)) {
-        if ($row = Base::table(trim($name, '"'))->find($_GET['row'] ?? 0, $ID)) {
-            $sql = Base::table('sqlite_master')->select('sql')->where('tbl_name', '=', trim($name, '"'))->first()->sql ?? "";
-            $sql_columns = substr($sql, strpos($sql, '(') + 1, -1);
-            $out .= '<h3>';
-            $out .= 'Update Row #' . $row->{$ID};
-            $out .= '</h3>';
+        if ($row = Base::table(trim($name, '"'))->find($_GET['row'] ?? 0, 'rowid')) {
             $out .= '<table>';
             $out .= '<tbody>';
-            foreach ($row as $k => $v) {
-                if ($ID === $k) {
+            $first = true;
+            foreach ($columns as $k => $v) {
+                if (!empty($v->pk)) {
                     continue;
                 }
+                $d = $v->dflt_value ?? "";
+                $n = $v->name;
+                $t = $v->type;
                 $out .= '<tr>';
                 $out .= '<th scope="row">';
-                $out .= $k;
+                $out .= $n;
                 $out .= '</th>';
                 $out .= '<td>';
-                $type = 'TEXT';
-                $default = null;
-                if ($sql_columns && preg_match('/"' . preg_quote($k) . '"\s+(\w+)(?:\s+DEFAULT\s+(".*?"|[^\s,]+))?/', $sql_columns, $m)) {
-                    // var_dump($m);
-                    $type = $m[1] ?? 'TEXT';
-                }
-                $vv = htmlspecialchars($v);
-                if ('BLOB' === $type) {
-                    $out .= '<input name="x" type="file">';
-                } else if ('BOOLEAN' === $type) {
-                    $out .= '<label>';
-                    $out .= '<input' . (0 === $v ? ' checked' : "") . ' name="x" type="radio" value="0">';
-                    $out .= ' ';
-                    $out .= '<span>';
-                    $out .= 'No';
-                    $out .= '</span>';
-                    $out .= '</label>';
-                    $out .= '<label>';
-                    $out .= '<input' . (1 === $v ? ' checked' : "") . ' name="x" type="radio" value="1">';
-                    $out .= ' ';
-                    $out .= '<span>';
-                    $out .= 'Yes';
-                    $out .= '</span>';
-                    $out .= '</label>';
-                } else if ('INTEGER' === $type) {
-                    $out .= '<input name="x" type="number" placeholder="' . $vv . '" value="' . $vv . '">';
+                if ('BLOB' === $t) {
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" type="file">';
+                } else if ('INTEGER' === $t) {
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '" step="1" type="number" value="' . htmlspecialchars($row->{$n} ?? "") . '">';
+                } else if ("" === $t || 'NULL' === $t) {
+                    $out .= '<code>';
+                    $out .= 'NULL';
+                    $out .= '</code>';
+                } else if ('REAL' === $t) {
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '" step="0.01" type="number" value="' . htmlspecialchars($row->{$n} ?? "") . '">';
                 } else {
-                    $out .= '<textarea name="x" placeholder="' . explode("\n", $vv)[0] . '">';
-                    $out .= $vv;
+                    $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '">';
+                    $out .= htmlspecialchars($row->{$n} ?? "");
                     $out .= '</textarea>';
                 }
                 $out .= '</td>';
                 $out .= '</tr>';
+                $first = false;
             }
             $out .= '</tbody>';
             $out .= '</table>';
             $out .= '<p>';
             $out .= '<button name="task" type="submit" value="update">';
-            $out .= 'Save';
+            $out .= 'Update';
             $out .= '</button>';
             $out .= ' ';
             $out .= '<button name="task" type="submit" value="delete">';
             $out .= 'Delete';
             $out .= '</button>';
+            $out .= '</p>';
+            $out .= '<input name="row" type="hidden" value=' . $stringify($_GET['row']) . '>';
+            $out .= '<input name="table" type="hidden" value=' . $stringify($_GET['table']) . '>';
+        } else {
+            $out .= '<p>';
+            $out .= 'Could not find a row with ID <code>' . $_GET['row'] . '</code> in table <code>' . trim($name, '"') . '</code>.';
             $out .= '</p>';
         }
     } else if ($table = Base::query('PRAGMA table_info(' . $name . ')')->get()) {
@@ -530,23 +640,33 @@ if (!empty($_GET['table'])) {
         $out .= '<thead>';
         $out .= '<tr>';
 
+        $keys = [];
+
+        $key = $table[0]->name ?? 'rowid';
         foreach ($table as $v) {
-            if ($ID !== ($n = $v->name)) {
-                $fields[] = 'SUBSTR(' . $stringify($n) . ', 1, ' . $TRUNCATE . ') AS ' . $stringify($n);
-            } else {
-                $fields[] = $stringify($n);
-            }
+            $keys[$n = $v->name] = $p = (int) $v->pk;
+            $fields[] = 'SUBSTR(' . $stringify($n) . ', 1, ' . $TRUNCATE . ') AS ' . $stringify($n);
             $out .= '<th>';
-            $out .= '<a' . ($n === ($_GET['sort'][1] ?? $ID) ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
+            $out .= '<a' . ($n === ($_GET['sort'][1] ?? $key) ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
                 'sort' => [1 === ($_GET['sort'][0] ?? -1) ? -1 : 1, $n]
             ]) . '">';
             $out .= $n;
-            if (!empty($v->pk)) {
-                $out .= '<small aria-label="Primary key" role="status">';
+            if (!empty($p)) {
+                $out .= '<small aria-label="Primary Key" role="status">';
                 $out .= '*';
                 $out .= '</small>';
             }
             $out .= '</a>';
+            $out .= '</th>';
+        }
+
+        // Has 0 or more than 1 primary key(s)!
+        if ($has_primary_key_alias = !$keys || count(array_filter($keys)) > 1) {
+            $out .= '<th>';
+            $out .= 'rowid';
+            $out .= '<small aria-label="Primary Key" role="status">';
+            $out .= '*';
+            $out .= '</small>';
             $out .= '</th>';
         }
 
@@ -556,7 +676,7 @@ if (!empty($_GET['table'])) {
 
         if (0 === $rows) {
             $out .= '<tr>';
-            $out .= '<td colspan="' . $columns . '" style="text-align: center;">';
+            $out .= '<td colspan="' . ($columns + 1) . '" style="text-align: center;">';
             $out .= '<i aria-label="No rows yet." role="status">';
             $out .= 'EMPTY';
             $out .= '</i>';
@@ -564,32 +684,41 @@ if (!empty($_GET['table'])) {
             $out .= '</tr>';
         } else {
             sort($fields);
-            $rows = Base::query('SELECT ' . implode(', ', $fields) . ' FROM ' . $name . ' ORDER BY ' . $stringify($_GET['sort'][1] ?? $ID) . ' ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? 20) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
+            if ($has_primary_key_alias) {
+                $fields[] = 'rowid';
+                $ref = $keys;
+                $keys = ['rowid' => 1];
+            }
+            $rows = Base::query('SELECT ' . implode(', ', $fields) . ' FROM ' . $name . ' ORDER BY ' . $stringify($_GET['sort'][1] ?? 'rowid') . ' ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? 20) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
             foreach ($rows as $row) {
                 $out .= '<tr>';
                 foreach ($row as $k => $v) {
                     $out .= '<td>';
-                    if ($ID === $k) {
+                    if (!empty($keys[$k])) {
                         $out .= '<a href="' . $path() . $query([
                             'chunk' => null,
                             'part' => null,
                             'row' => $v,
                             'sort' => null,
-                            'table' => $_GET['table'],
+                            'table' => trim($name, '"'),
                             'task' => null
                         ]) . '">';
                     }
                     if (null === $v) {
-                        $out .= '<i aria-label="Null value" role="status">';
-                        $out .= 'NULL';
-                        $out .= '</i>';
+                        if ($has_primary_key_alias && !empty($ref[$k])) {
+                            $out .= $row->rowid ?? '?';
+                        } else {
+                            $out .= '<i aria-label="Null value" role="status">';
+                            $out .= 'NULL';
+                            $out .= '</i>';
+                        }
                     } else if ("" === $v) {
                         $out .= '<i aria-label="Empty string value" role="status">';
                         $out .= 'EMPTY';
                         $out .= '</i>';
                     }
                     $out .= $TRUNCATE === strlen($v) ? htmlspecialchars($v) . '&hellip;' : htmlspecialchars($v);
-                    if ($ID === $k) {
+                    if (!empty($keys[$k])) {
                         $out .= '</a>';
                     }
                     $out .= '</td>';
@@ -601,11 +730,11 @@ if (!empty($_GET['table'])) {
         $out .= '</tbody>';
         $out .= '</table>';
 
-        $the_pager = $pager($_GET['part'] ?? 1, Base::table(trim($name, '"'))->count(), $_GET['chunk'] ?? 20, 2, static function($part) use($ID, $path, $query) {
+        $the_pager = $pager($_GET['part'] ?? 1, Base::table(trim($name, '"'))->count(), $_GET['chunk'] ?? 20, 2, static function($part) use($path, $query) {
             return $path() . strtr($query([
                 'chunk' => $_GET['chunk'] ?? 20,
                 'part' => $part,
-                'sort' => $_GET['sort'] ?? [-1, $ID]
+                'sort' => $_GET['sort'] ?? [-1]
             ]), ['&' => '&amp;']);
         }, 'First', 'Previous', 'Next', 'Last');
 
@@ -638,6 +767,7 @@ const tableColumns = document.querySelector('#table-columns').textContent.trim()
 const tableRows = document.querySelector('#table-rows').textContent.trim();
 drop.disabled = false;
 drop.addEventListener('click', dropTable, false);
+drop.previousElementSibling.focus(); // Focus to the `insert` “button”
 function dropTable(e) {
     if (window.confirm('Dropping a table is a dangerous action. We need to confirm that you consciously want to do so.')) {
         let table = window.prompt('Please write down the table name you want to drop:');
@@ -677,109 +807,94 @@ JS;
 } else {
     $task = $_GET['task'] ?? null;
     if ('create' === $task) {
-        $out .= '<h3>';
-        $out .= 'Create Table';
-        $out .= '</h3>';
         $out .= '<p>';
         $out .= '<label for="' . ($id = 'f:' . substr(uniqid(), 6)) . '">';
-        $out .= 'Name';
+        $out .= 'Table';
         $out .= '</label>';
         $out .= '<input autofocus class="table" id="' . $id . '" name="table" placeholder="FooBarBaz" pattern="' . $PATTERN_TABLE . '" required type="text">';
-        $out .= ' ';
-        $out .= '<button class="add" disabled title="Add Column" type="button">';
+        $out .= '<button class="add" title="Add Column" type="button">';
         $out .= '&plus;';
         $out .= '</button>';
         $out .= '<table>';
         $out .= '<thead>';
         $out .= '<tr>';
         $out .= '<th scope="col">';
-        $out .= 'Name';
+        $out .= 'Key';
+        $out .= '</th>';
+        $out .= '<th scope="col">';
+        $out .= 'Value';
         $out .= '</th>';
         $out .= '<th scope="col">';
         $out .= 'Type';
         $out .= '</th>';
+        $out .= '<th scope="col">';
+        $out .= 'Rules';
+        $out .= '</th>';
         $out .= '</tr>';
         $out .= '</thead>';
         $out .= '<tbody id="columns">';
-        $out .= '<tr data-type="INTEGER">';
+        $out .= '</tbody>';
+        $out .= '<tfoot>';
+        $out .= '<tr>';
         $out .= '<th scope="row">';
-        $out .= 'ID';
-        $out .= '<small aria-label="Primary key" role="status">';
-        $out .= '*';
-        $out .= '</small>';
+        $out .= 'Primary';
         $out .= '</th>';
-        $out .= '<td>';
-        $out .= '<label class="column-type:integer">';
-        $out .= '<input checked disabled type="radio">';
-        $out .= ' ';
-        $out .= '<span>';
-        $out .= 'Integer';
-        $out .= '</span>';
-        $out .= '</label>';
-        $out .= '<br>';
-        $out .= '<label class="column-rule:primary-key">';
-        $out .= '<input checked disabled type="checkbox">';
-        $out .= ' ';
-        $out .= '<span>';
-        $out .= 'Primary Key';
-        $out .= '</span>';
-        $out .= '</label>';
+        $out .= '<td colspan="3" id="keys">';
         $out .= '</td>';
         $out .= '</tr>';
-        $out .= '</tbody>';
+        $out .= '</tfoot>';
         $out .= '</table>';
         $out .= '<p>';
-        $out .= '<button class="create" disabled name="task" type="submit" value="create">';
+        $out .= '<button class="create" name="task" type="submit" value="create">';
         $out .= 'Create';
         $out .= '</button>';
         $out .= '</p>';
         $out .= '<template id="column">';
         $out .= '<tr data-type="TEXT">';
-        $out .= '<th scope="row">';
+        $out .= '<th scope="row" style="width: 1px; white-space: nowrap;">';
         $out .= '<button class="remove" title="Remove Column" type="button">';
         $out .= '&minus;';
         $out .= '</button>';
-        $out .= ' ';
         $out .= '<input name="columns[][key]" placeholder="fooBarBaz" pattern="' . $PATTERN_TABLE_COLUMN . '" required type="text">';
         $out .= '</th>';
+        $out .= '<td style="width: 1px; white-space: nowrap;">';
+        $out .= '<button class="reset" title="Clear Value" type="button">';
+        $out .= '&times;';
+        $out .= '</button>';
+        $out .= '<input name="columns[][value]" placeholder="NULL" type="text">';
+        $out .= '</td>';
         $out .= '<td>';
-        $types = [
-            'BLOB' => 'Binary',
-            'NULL' => 'Null',
-            'BOOLEAN DEFAULT 0 CHECK(%2$s IN (0, 1))' => 'Boolean',
-            'NUMBER' => 'Integer',
-            'REAL' => 'Float',
-            'TEXT' => 'String'
-        ];
-        asort($types);
-        foreach ($types as $k => $v) {
-            $out .= '<label class="column-type:' . strtolower(explode(' ', $k)[0]) . '">';
-            $out .= '<input' . ('TEXT' === $k ? ' checked' : "") . ' name="columns[][type]" type="radio" value="' . $k . '">';
+        $types = ['BLOB', 'INTEGER', 'NULL', 'REAL', 'TEXT'];
+        foreach ($types as $type) {
+            $out .= '<label class="column-type:' . strtolower($type) . '">';
+            $out .= '<input' . ('TEXT' === $type ? ' checked' : "") . ' name="columns[][type]" type="radio" value="' . $type . '">';
             $out .= ' ';
             $out .= '<span>';
-            $out .= $v;
+            $out .= '<code>';
+            $out .= $type;
+            $out .= '</code>';
             $out .= '</span>';
             $out .= '</label>';
         }
-        $out .= '<br>';
+        $out .= '</td>';
+        $out .= '<td>';
         $out .= '<label class="column-rule:not-null">';
         $out .= '<input name="columns[][rule][NOT NULL]" type="checkbox">';
         $out .= ' ';
         $out .= '<span>';
-        $out .= 'Not Null';
+        $out .= '<code>';
+        $out .= 'NOT NULL';
+        $out .= '</code>';
         $out .= '</span>';
         $out .= '</label>';
-        $out .= '<br>';
         $out .= '<label class="column-rule:unique">';
         $out .= '<input name="columns[][rule][UNIQUE]" type="checkbox">';
         $out .= ' ';
         $out .= '<span>';
-        $out .= 'Unique';
+        $out .= '<code>';
+        $out .= 'UNIQUE';
+        $out .= '</code>';
         $out .= '</span>';
-        $out .= '</label>';
-        $out .= '<br>';
-        $out .= '<label class="column-rule:default">';
-        $out .= '<input name="columns[][rule][DEFAULT]" placeholder="Default" type="text">';
         $out .= '</label>';
         $out .= '</td>';
         $out .= '</tr>';
@@ -790,38 +905,51 @@ const add = document.querySelector('.add');
 const column = document.querySelector('#column');
 const columns = document.querySelector('#columns');
 const create = document.querySelector('.create');
-const table = document.querySelector('.table');
+const keys = document.querySelector('#keys');
 add.addEventListener('click', addColumn, false);
-table.addEventListener('input', onChangeValue, false);
-table.addEventListener('keydown', onChangeValue, false);
 let index = 0;
 function addColumn() {
-   let node = column.content.cloneNode(true),
-       remove = node.querySelector('.remove');
+    let key = document.createElement('label'),
+        node = column.content.cloneNode(true),
+        remove = node.querySelector('.remove'),
+        reset = node.querySelector('.reset');
     remove.addEventListener('click', removeColumn, false);
+    reset.addEventListener('click', resetValue, false);
     node.querySelectorAll('[name*="[]"]').forEach(v => v.name = v.name.replace(/\[\]/g, '[' + index + ']'));
     columns.appendChild(node);
-    node = columns.querySelector('tr:last-child th input[type="text"]');
-    node.addEventListener('input', onChangeValue, false);
-    node.addEventListener('keydown', onChangeValue, false);
-    node.focus();
+    if (node = columns.querySelector('tr:last-child th input[type="text"]')) {
+        node.__key = key;
+        node.addEventListener('focus', onUpdateKey, false);
+        node.addEventListener('input', onUpdateKey, false);
+        node.addEventListener('keydown', onUpdateKey, false);
+        node.focus();
+        keys.appendChild(key);
+    }
     columns.querySelectorAll('tr:last-child td input[type="radio"]').forEach(v => v.addEventListener('change', onChangeType, false));
-    create.disabled = true;
     ++index;
 }
 function onChangeType() {
     let type = this.value.split(/\s+/)[0];
     this.closest('tr').dataset.type = type;
 }
-function onChangeValue() {
-    add.disabled = create.disabled = !this.validity.valid;
+function onUpdateKey() {
+    let key = this.__key,
+        value = this.value;
+    key.innerHTML = "" !== value ? '<input name="primary[' + value + ']" type="checkbox"> <span>' + value + '</span>' : "";
 }
 function removeColumn() {
     this.parentNode.parentNode.remove();
 }
+function resetValue() {
+    let next = this.nextElementSibling;
+    next && (next.value = ""), next.focus();
+}
 JS;
         $out .= '</script>';
     } else {
+        $out .= '<p>';
+        $out .= 'I created this project to fulfill my curiosity about databases. If you find this project useful, please <a href="https://github.com/taufik-nurrohman/table-manager" target="_blank">rate it</a> or share it with your friends. But most importantly, please support me to develop <a href="https://github.com/mecha-cms" target="_blank">Mecha</a> further! Thank you 💕';
+        $out .= '</p>';
         $out .= '<p>';
         $out .= 'Please select a table, or create a new one!';
         $out .= '</p>';
@@ -858,6 +986,12 @@ if ($tables = Base::query("SELECT name FROM sqlite_master WHERE type = 'table' A
         $out .= '</li>';
     }
     $out .= '</ul>';
+} else {
+    $out .= '<p>';
+    $out .= '<i aria-label="Empty data" role="status">';
+    $out .= 'EMPTY';
+    $out .= '</i>';
+    $out .= '</p>';
 }
 
 if (!isset($_GET['task'])) {
@@ -885,476 +1019,3 @@ echo $out;
 unset($_SESSION[$SESSION]);
 
 exit;
-
-if ('POST' === $_SERVER['REQUEST_METHOD']) {
-    $table = $_POST['table'] ?? null;
-    $task = $_POST['task'] ?? null;
-    if ('create' === $task) {
-    }
-    if ('insert' === $task) {
-        $values = [];
-        if (!empty($_POST['values'])) {
-            foreach ($_POST['values'] as $k => $v) {
-                if (isset($_FILES['values']['name'][$k])) {
-                    continue;
-                }
-                $values[$k] = $v;
-            }
-        }
-        if (!empty($_FILES['values'])) {
-            foreach ($_FILES['values']['name'] as $k => $v) {
-                if (!empty($_FILES['values']['error'][$k])) {
-                    continue;
-                }
-                $values[$k] = 'data:' . $_FILES['values']['type'][$k] . ',' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k]));
-            }
-        }
-        if (Base::table($table)->insert($values)) {
-            $_SESSION['status'] = 'Inserted 1 row to table <code>' . $table . '</code>.';
-            header('location: ' . $path . query([
-                'table' => $table,
-                'task' => 'select'
-            ]));
-            exit;
-        }
-        $_SESSION['status'] = 'Could not insert row into table <code>' . $table . '</code>.';
-        if ($errors = Base::pdo()->errorInfo()) {
-            foreach ($errors as $k => $v) {
-                $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
-            }
-        }
-        header('location: ' . $path . $query);
-        exit;
-    }
-    if ('delete' === $task) {
-        $query = query([
-            'table' => $table,
-            'task' => 'select'
-        ]);
-        if (isset($_POST['row'])) {
-            if (Base::table($table)->where('ID', '=', $id = (int) $_POST['row'])->delete()) {
-                $_SESSION['status'] = 'Deleted 1 row with ID <code>' . $id . '</code> in table <code>' . $table . '</code>.';
-                header('location: ' . $path . $query);
-                exit;
-            }
-            $_SESSION['status'] = 'Could not delete row with ID <code>' . $id . '</code> in table <code>' . $table . '</code>.';
-            if ($errors = Base::pdo()->errorInfo()) {
-                foreach ($errors as $k => $v) {
-                    $_SESSION['status'] .= '<br><b>DEBUG(' . $k . '):</b> ' . $v;
-                }
-            }
-            header('location: ' . $path . $query);
-            exit;
-        }
-    }
-    if (isset($_POST['drop'])) {
-    }
-    if (isset($_POST['select'])) {
-        header('location: ' . $path . query([
-            'table' => $_POST['select'],
-            'task' => 'select'
-        ]));
-        exit;
-    }
-} else {
-    if (isset($_GET['task']) && 'list' === $_GET['task']) {
-        // Redirect to home page
-        header('location: ' . $path);
-        exit;
-    }
-}
-
-?>
-<!DOCTYPE html>
-<html dir="ltr">
-  <head>
-    <meta content="width=device-width">
-    <meta charset="utf-8">
-    <title>
-      Table Management System
-    </title>
-    <style></style>
-  </head>
-  <body>
-    <?php $task_default = ($task = $_GET['task'] ?? null) ?? 'create'; ?>
-    <?php if (isset($_SESSION['status'])): ?>
-      <p role="alert">
-        <?= $_SESSION['status']; ?>
-      </p>
-    <?php endif; ?>
-    <form action="<?= $path; ?>" enctype="multipart/form-data" method="post">
-      <?php if ($task): ?>
-        <?php if ('create' === $task): ?>
-          <p>
-            <label>
-              <b>Table Name</b>
-            </label>
-            <p>
-              <input autofocus id="table-name" name="table" pattern="^[A-Z_][a-zA-Z\d_]*(?:_[A-Z\d][a-zA-Z\d]*)*$" placeholder="FooBarBaz" required type="text">
-            </p>
-          </p>
-          <p>
-            <label>
-              <b>Table Columns</b>
-            </label>
-          </p>
-          <table hidden>
-            <thead>
-              <th>
-                Name
-              </th>
-              <th>
-                Type
-              </th>
-              <th>
-                &hellip;
-              </th>
-            </thead>
-            <tbody id="table-rows-container"></tbody>
-          </table>
-          <p>
-            <button class="add-table-column" disabled type="button">
-              Add Column
-            </button>
-            <button class="create-table" disabled name="task" type="submit" value="create">
-              Create Table
-            </button>
-          </p>
-          <template id="table-column-template">
-            <tr>
-              <td>
-                <input name="keys[key][]" pattern="^[a-zA-Z_][a-zA-Z\d_]*(?:_[a-zA-Z\d]*)*$" placeholder="fooBarBaz" required type="text">
-              </td>
-              <td>
-                <ul>
-                  <?php
-
-                  $types = [
-                      'BLOB' => 'Binary',
-                      'BOOLEAN DEFAULT 0 CHECK (%s IN (0, 1))' => 'Boolean',
-                      'INTEGER' => 'Integer',
-                      'NULL' => 'Null',
-                      'REAL' => 'Float',
-                      'TEXT' => 'String'
-                  ];
-
-                  asort($types);
-
-                  ?>
-                  <?php foreach ($types as $k => $v): ?>
-                    <li>
-                      <p>
-                        <label>
-                          <input class="the-table-column"<?= 'TEXT' === $k ? ' checked' : ""; ?> name="keys[type][]" type="radio" value="<?= htmlspecialchars($k); ?>">
-                          <span>
-                            <?= $v; ?>
-                          </span>
-                        </label>
-                      </p>
-                      <p<?= 'TEXT' === $k ? "" : ' hidden'; ?>>
-                        <b>Rules</b>
-                      </p>
-                      <ul<?= 'TEXT' === $k ? "" : ' hidden'; ?>>
-                        <?php if ('Boolean' === $v): ?>
-                          <li>
-                            <label>
-                              <span>Default:</span>
-                              <input max="1" min="0" name="keys[value][]" step="1" type="number" value="0">
-                            </label>
-                          </li>
-                        <?php elseif ('Null' === $v): ?>
-                          <li>
-                            <i>None.</i>
-                          </li>
-                        <?php else: ?>
-                          <?php if ('NUMBER' === $k || 'REAL' === $k): ?>
-                            <li>
-                              <label>
-                                <input name="keys[rules][][AUTOINCREMENT]" type="checkbox">
-                                <span>
-                                  Automatically increment the value on this field if it was not set explicitly by the user. The automatic value is made based on the last number that has been inserted in the previous action.
-                                </span>
-                              </label>
-                            </li>
-                          <?php endif; ?>
-                          <li>
-                            <label>
-                              <input name="keys[rules][][NOT NULL]" type="checkbox">
-                              <span>
-                                Force user to provide specific data on this field, or else the insertion process will be rejected.
-                              </span>
-                            </label>
-                          </li>
-                          <li>
-                            <label>
-                              <input name="keys[rules][][UNIQUE]" type="checkbox">
-                              <span>
-                                Make sure this field rejects the given value if it already exists in other records.
-                              </span>
-                            </label>
-                          </li>
-                        <?php endif; ?>
-                      </ul>
-                    </li>
-                  <?php endforeach; ?>
-                </ul>
-              </td>
-              <td>
-                <button class="remove-table-column" type="button">
-                  Remove
-                </button>
-              </td>
-            </tr>
-          </template>
-          <script>
-
-          const tableColumnAdd = document.querySelector('.add-table-column');
-          const tableColumnTemplate = document.querySelector('#table-column-template');
-          const tableCreate = document.querySelector('.create-table');
-          const tableName = document.querySelector('#table-name');
-          const tableRowsContainer = document.querySelector('#table-rows-container');
-
-          let index = 0;
-
-          function addColumn() {
-              tableRowsContainer.appendChild(tableColumnTemplate.content.cloneNode(true));
-              setTimeout(() => {
-                  document.querySelectorAll('[name]').forEach(input => {
-                      input.name = input.name.replace(/\[\]/g, '[' + index + ']');
-                  });
-                  let focus = [...tableRowsContainer.querySelectorAll('input[type="text"]')].pop();
-                  focus && focus.focus();
-                  document.querySelectorAll('.remove-table-column:not(.has-event)').forEach(remove => {
-                      remove.addEventListener('click', removeColumn, false);
-                      remove.classList.add('has-event');
-                  });
-                  document.querySelectorAll('.the-table-column:not(.has-event)').forEach(the => {
-                      the.addEventListener('change', changeType, false);
-                      the.classList.add('has-event');
-                  });
-                  ++index;
-              }, 1);
-              checkTable();
-          }
-
-          function changeType() {
-              document.querySelectorAll('.the-table-column').forEach(the => {
-                  the.parentNode.parentNode.nextElementSibling.hidden = true;
-                  the.parentNode.parentNode.nextElementSibling.nextElementSibling.hidden = true;
-              });
-              this.parentNode.parentNode.nextElementSibling.hidden = false;
-              this.parentNode.parentNode.nextElementSibling.nextElementSibling.hidden = false;
-          }
-
-          function checkTable() {
-              tableRowsContainer.closest('table').hidden = 0 === tableRowsContainer.children.length;
-          }
-
-          function checkTableName() {
-              let valid = tableName.validity && tableName.validity.valid;
-              tableColumnAdd.disabled = !valid;
-              tableCreate.disabled = !valid;
-          }
-
-          function removeColumn() {
-              this.closest('tr').remove();
-              checkTable();
-              --index;
-          }
-
-          tableColumnAdd.addEventListener('click', addColumn, false);
-
-          tableName.addEventListener('input', checkTableName, false);
-          tableName.addEventListener('keyup', checkTableName, false);
-
-          </script>
-        <?php elseif ('insert' === $task): ?>
-          <?php if ($table = Base::query('PRAGMA table_info(' . strtr($_GET['table'], ['"' => '""']) . ')')->get()): ?>
-            <input name="table" type="hidden" value="<?= $_GET['table']; ?>">
-            <table>
-              <thead>
-                <tr>
-                  <?php foreach ($table as $k => $v): ?>
-                    <th>
-                      <?= $v->name; ?><?= '1' === $v->pk ? '<small aria-label="Primary Key" role="status">*</small>' : ""; ?>
-                    </th>
-                  <?php endforeach; ?>
-                  <th>
-                    &hellip;
-                  </th>
-                </tr>
-              </thead>
-              <tfoot>
-                <tr>
-                  <?php foreach ($table as $k => $v): ?>
-                    <?php if ('ID' === $v->name): ?>
-                      <td></td>
-                    <?php else: ?>
-                      <td>
-                        <?php if ('BLOB' === $v->type): ?>
-                          <input name="values[<?= $v->name; ?>]" style="display: block; width: 100%;" type="file">
-                        <?php elseif ('INTEGER' === $v->type): ?>
-                          <input name="values[<?= $v->name; ?>]" placeholder="<?= $v->dflt_value ?? ""; ?>" style="display: block; width: 100%;" type="number">
-                        <?php elseif ('NULL' === $v->type): ?>
-                          <em>NULL</em>
-                        <?php elseif ('REAL' === $v->type): ?>
-                          <input name="values[<?= $v->name; ?>]" placeholder="<?= $v->dflt_value ?? ""; ?>" style="display: block; width: 100%;" type="number">
-                        <?php else: ?>
-                          <textarea name="values[<?= $v->name; ?>]" placeholder="<?= $v->dflt_value ?? ""; ?>" style="display: block; width: 100%;"></textarea>
-                        <?php endif; ?>
-                      </td>
-                    <?php endif; ?>
-                  <?php endforeach; ?>
-                  <td>
-                    <button name="task" type="submit" value="insert">
-                      Insert
-                    </button>
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          <?php else: ?>
-            <p>
-              Table <code>
-                <?= $_GET['table']; ?>
-              </code> does not exist.
-            </p>
-          <?php endif; ?>
-        <?php elseif ('select' === $task): ?>
-          <?php if ($table = Base::query('PRAGMA table_info(' . strtr($_GET['table'], ['"' => '""']) . ')')->get()): ?>
-            <input name="table" type="hidden" value="<?= $_GET['table']; ?>">
-            <input name="task" type="hidden" value="delete">
-            <table>
-              <?php $fields = []; ?>
-              <thead>
-                <tr>
-                  <?php $sort = $_GET['sort'][0] ?? '-1'; ?>
-                  <?php foreach ($table as $k => $v): ?>
-                    <th>
-                      <a<?= $v->name === ($_GET['sort'][1] ?? 'ID') ? ' aria-current="true"' : ""; ?> href="<?= $path . strtr(query([
-                          'sort' => ['1' === $sort ? '-1' : '1', $v->name]
-                      ]), ['&' => '&amp;']); ?>">
-                        <?= $v->name; ?><?= '1' === $v->pk ? '<small aria-label="Primary Key" role="status">*</small>' : ""; ?>
-                      </a>
-                    </th>
-                    <?php $fields[] = 'SUBSTR(' . $v->name . ', 1, 50)'; ?>
-                  <?php endforeach; ?>
-                  <th>
-                    &hellip;
-                  </th>
-                </tr>
-              </thead>
-              <?php if ($rows = Base::query('SELECT ID, ' . implode(', ', $fields) . ' FROM "' . strtr($_GET['table'], ['"' => '""']) . '" ORDER BY "' . strtr($_GET['sort'][1] ?? 'ID', ['"' => '""']) . '" ' . ('1' === ($_GET['sort'][0] ?? '-1') ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = (int) ($_GET['chunk'] ?? 20)) . ' OFFSET ' . ($chunk * (((int) ($_GET['part'] ?? 1)) - 1)))->get()): ?>
-                <tbody>
-                  <?php foreach ($rows as $k => $v): ?>
-                    <tr>
-                      <?php foreach ($v as $kk => $vv): ?>
-                        <?php if ('ID' === $kk) continue; ?>
-                        <td>
-                          <?= 50 === strlen($vv) ? htmlspecialchars($vv) . '&hellip;' : htmlspecialchars($vv); ?>
-                        </td>
-                      <?php endforeach; ?>
-                      <td>
-                        <button name="row" type="submit" value="<?= $v->ID; ?>">
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  <?php endforeach; ?>
-                </tbody>
-              <?php endif; ?>
-            </table>
-            <?php $pager = pager((int) ($_GET['part'] ?? 1), Base::table($_GET['table'])->count(), (int) ($_GET['chunk'] ?? 20), 2, static function($part) use($path) {
-                return $path . strtr(query([
-                    'chunk' => $_GET['chunk'] ?? 20,
-                    'part' => $part,
-                    'sort' => $_GET['sort'] ?? ['-1', 'ID'],
-                    'task' => 'select'
-                ]), ['&' => '&amp;']);
-            }, 'First', 'Previous', 'Next', 'Last'); ?>
-            <?php if ($pager): ?>
-              <p>
-                <?= $pager; ?>
-              </p>
-            <?php endif; ?>
-          <?php else: ?>
-            <p>
-              Table <code>
-                <?= $_GET['table']; ?>
-              </code> does not exist.
-            </p>
-          <?php endif; ?>
-        <?php elseif ('update' === $task): ?>
-        <?php endif; ?>
-      <?php else: ?>
-        <?php if ($tables = Base::query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")->get()): ?>
-          <table>
-            <thead>
-              <tr>
-                <th>
-                  Tables
-                </th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <?php foreach ($tables as $k => $v): ?>
-                <tr>
-                  <td>
-                    <span>
-                      <?= $v->name; ?>
-                    </span>
-                    <br>
-                    <?php $columns = count((array) Base::query('PRAGMA table_info("' . strtr($v->name, ['"' => '""']) . '")')->get()); ?>
-                    <?php $rows = Base::table($v->name)->count(); ?>
-                    <small>
-                      <?= $columns . ' Column' . (1 === $columns ? "" : 's'); ?>, <?= $rows . ' Row' . (1 === $rows ? "" : 's'); ?>
-                    </small>
-                  </td>
-                  <td>
-                    <button name="select" type="submit" value="<?= $v->name; ?>">
-                      Select
-                    </button>
-                    <button name="drop" onclick="return confirm('Are you sure you want to delete this table with its rows?')" type="submit" value="<?= $v->name; ?>">
-                      Drop
-                    </button>
-                  </td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
-        <?php else: ?>
-          <p>
-            No tables yet.
-          </p>
-        <?php endif; ?>
-      <?php endif; ?>
-    </form>
-    <hr>
-    <form action="<?= $path; ?>" method="get">
-      <?php if ('create' === $task): ?>
-        <button name="task" type="submit" value="list">
-          Back
-        </button>
-      <?php elseif ('insert' === $task): ?>
-        <button name="task" type="submit" value="select">
-          Back
-        </button>
-        <input name="table" type="hidden" value="<?= $_GET['table']; ?>">
-      <?php elseif ('select' === $task): ?>
-        <button name="task" type="submit" value="list">
-          Back
-        </button>
-        <button name="task" type="submit" value="insert">
-          New Row
-        </button>
-        <input name="table" type="hidden" value="<?= $_GET['table']; ?>">
-      <?php else: ?>
-        <button name="task" type="submit" value="create">
-          Create Table
-        </button>
-      <?php endif; ?>
-    </form>
-  </body>
-</html>
-<?php unset($_SESSION['status']); ?>
