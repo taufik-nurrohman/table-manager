@@ -12,15 +12,17 @@ Table Manager
 Features
 --------
 
+ - [ ] Add column.
  - [ ] Filter rows.
- - [ ] Rename column.
  - [x] Color preview (HEX).
  - [x] Create table.
  - [x] Delete row.
+ - [x] Drop column.
  - [x] Drop table.
  - [x] Image preview.
  - [x] Insert row.
  - [x] Paginate rows.
+ - [x] Rename column.
  - [x] Rename table.
  - [x] Update row.
  - [x] View (select) table.
