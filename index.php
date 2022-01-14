@@ -45,6 +45,14 @@ $THUMB = 320;
 $PATH = trim(strtr(strtr(__DIR__ . '/', "\\", '/'), [strtr($_SERVER['DOCUMENT_ROOT'], "\\", '/') => '/']), '/');
 $PATH = "" !== $PATH ? '/' . $PATH . '/index.php' : '/index.php';
 
+$safe = static function($value, $force = false) {
+    $value = strip_tags(strtr($value ?? "", ['"' => '""']));
+    if (!$force) {
+        return is_numeric($value) ? $value : ("" !== $value ? '"' . $value . '"' : 'NULL');
+    }
+    return "" !== $value ? '"' . $value . '"' : 'NULL';
+};
+
 // <https://salman-w.blogspot.com/2014/04/stackoverflow-like-pagination.html>
 $pager = static function($current, $count, $chunk, $peek, $fn, $first, $previous, $next, $last) {
     $begin = 1;
@@ -116,11 +124,6 @@ $query = static function(array $alter = []) {
     return "" !== $q ? '?' . $q : "";
 };
 
-$stringify = static function($value) {
-    $value = strip_tags(strtr($value ?? "", ['"' => '""']));
-    return "" !== $value ? '"' . $value . '"' : 'NULL';
-};
-
 if (!is_file($FILE)) {
     $_SESSION[$SESSION][] = 'Table does not exist. Automatically create a table for you.';
 }
@@ -138,7 +141,7 @@ try {
 if ('POST' === $_SERVER['REQUEST_METHOD']) {
     if (isset($_POST['drop'])) {
         try {
-            Base::query($stmt = 'DROP TABLE ' . $stringify($table = $_POST['drop']))->get();
+            Base::query($stmt = 'DROP TABLE ' . $safe($table = $_POST['drop'], 1))->get();
             $_SESSION[$SESSION][] = 'Dropped table <code>' . $table . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
@@ -159,20 +162,89 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         exit;
     }
     if ('alter' === $task) {
-        try {
-            Base::query($stmt = 'ALTER TABLE ' . $stringify($from = $_POST['table']['from']) . ' RENAME TO ' . $stringify($to = $_POST['table']['to']))->get();
-            $_SESSION[$SESSION][] = 'Renamed table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
-            if ($DEBUG) {
-                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+        $table = $_POST['table'] ?? 0;
+        if (empty($table)) {
+            $_SESSION[$SESSION][] = 'Unknown table.';
+            header('location: ' . $path());
+            exit;
+        }
+        if (isset($_POST['column']['to'])) {
+            $from = $_POST['column']['from'] ?? 0;
+            $to = $_POST['column']['to'] ?? 0;
+            if (isset($_POST['alter']) && 0 === $_POST['alter']) {
+                try {
+                    Base::query($stmt = 'ALTER TABLE ' . $safe($table, 1) . ' DROP COLUMN ' . $safe($from, 1))->get();
+                    $_SESSION[$SESSION][] = 'Dropped column <code>' . $from . '</code> from table <code>' . $table . '</code>.';
+                    if ($DEBUG) {
+                        $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+                    }
+                } catch (Exception $e) {
+                    $_SESSION[$SESSION][] = 'Could not drop column <code>' . $from . '</code> from table <code>' . $table . '</code>.';
+                    if ($DEBUG) {
+                        $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+                    }
+                }
+                header('location: ' . $path() . $query([
+                    'chunk' => null,
+                    'column' => null,
+                    'part' => null,
+                    'row' => null,
+                    'sort' => null,
+                    'table' => $table,
+                    'task' => null
+                ]));
+                exit;
             }
-        } catch (Exception $e) {
-            $_SESSION[$SESSION][] = 'Could not rename table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
-            if ($DEBUG) {
-                $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            if ($to === $from) {
+                // Skip!
+                $_SESSION[$SESSION][] = 'Nothing updated.';
+            } else {
+                try {
+                    Base::query($stmt = 'ALTER TABLE ' . $safe($table, 1) . ' RENAME COLUMN ' . $safe($from, 1) . ' TO ' . $safe($to, 1))->get();
+                    $_SESSION[$SESSION][] = 'Renamed column in table <code>' . $table . '</code> from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                    if ($DEBUG) {
+                        $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+                    }
+                } catch (Exception $e) {
+                    $_SESSION[$SESSION][] = 'Could not rename column in table <code>' . $table . '</code> from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                    if ($DEBUG) {
+                        $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+                    }
+                }
+            }
+            header('location: ' . $path() . $query([
+                'chunk' => null,
+                'column' => $to,
+                'part' => null,
+                'row' => null,
+                'sort' => null,
+                'table' => $table,
+                'task' => null
+            ]));
+            exit;
+        }
+        $from = $_POST['table']['from'] ?? 0;
+        $to = $_POST['table']['to'] ?? 0;
+        if ($to === $from) {
+            // Skip!
+            $_SESSION[$SESSION][] = 'Nothing updated.';
+        } else {
+            try {
+                Base::query($stmt = 'ALTER TABLE ' . $safe($from, 1) . ' RENAME TO ' . $safe($to, 1))->get();
+                $_SESSION[$SESSION][] = 'Renamed table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                if ($DEBUG) {
+                    $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+                }
+            } catch (Exception $e) {
+                $_SESSION[$SESSION][] = 'Could not rename table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                if ($DEBUG) {
+                    $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+                }
             }
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
+            'column' => null,
             'part' => null,
             'row' => null,
             'sort' => null,
@@ -192,7 +264,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             foreach ($v['rule'] ?? [] as $kk => $vv) {
                 $rules .= ' ' . $kk;
             }
-            $value = is_numeric($value) || in_array($value, $options, true) ? $value : $stringify($value);
+            $value = in_array($value, $options, true) ? $value : $safe($value);
             if (false === $value) {
                 $value = 'FALSE';
             } else if (null === $value) {
@@ -200,14 +272,14 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             } else if (true === $value) {
                 $value = 'TRUE';
             }
-            $columns[$key] = trim($stringify($key) . ' ' . $type . ('NULL' !== $value ? ' DEFAULT ' . $value : "") . $rules);
+            $columns[$key] = trim($safe($key, 1) . ' ' . $type . ('NULL' !== $value ? ' DEFAULT ' . $value : "") . $rules);
         }
-        $stmt = 'CREATE TABLE ' . $stringify($table = $_POST['table']);
+        $stmt = 'CREATE TABLE ' . $safe($table = $_POST['table'], 1);
         if ($columns) {
             ksort($columns);
             $keys = [];
             foreach ($_POST['primary'] ?? [] as $k => $v) {
-                $keys[] = $stringify($k);
+                $keys[] = $safe($k, 1);
             }
             $primary = $keys ? ', PRIMARY KEY(' . implode(', ', $keys) . ')' : "";
             $stmt .= ' (' . implode(', ', $columns) . $primary . ')';
@@ -226,6 +298,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
+            'column' => null,
             'part' => null,
             'row' => null,
             'sort' => null,
@@ -233,9 +306,10 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             'task' => null
         ]));
         exit;
-    } else if ('delete' === $task) {
+    }
+    if ('delete' === $task) {
         try {
-            Base::query($stmt = 'DELETE FROM ' . $stringify($table = $_POST['table']) . ' WHERE ' . $stringify($column = $_POST['column'] ?? 'rowid') . ' = ' . $stringify($row = $_POST['row']))->get();
+            Base::query($stmt = 'DELETE FROM ' . $safe($table = $_POST['table'], 1) . ' WHERE ' . $safe($column = $_POST['column'] ?? 'rowid', 1) . ' = ' . $safe($row = $_POST['row']))->get();
             $_SESSION[$SESSION][] = 'Deleted 1 row with ID <code>' . $row . '</code> from table <code>' . $table . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
@@ -248,6 +322,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
+            'column' => null,
             'part' => null,
             'row' => null,
             'sort' => null,
@@ -255,18 +330,19 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             'task' => null
         ]));
         exit;
-    } else if ('insert' === $task) {
+    }
+    if ('insert' === $task) {
         try {
             $keys = $values = [];
             foreach ($_POST['values'] ?? [] as $k => $v) {
                 if (isset($_FILES['values']['name'][$k])) {
                     continue;
                 }
-                $keys[] = $stringify($k);
+                $keys[] = $safe($k, 1);
                 if (is_array($v) && (array_key_exists('date', $v) || array_key_exists('time', $v))) {
                     $v = trim(implode(' ', $v));
                 }
-                $values[] = is_numeric($v) ? $v : $stringify($v);
+                $values[] = $safe($v);
             }
             $errors = [
                 0 => 'There is no error, the file uploaded with success.',
@@ -284,10 +360,10 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                     $_SESSION[$SESSION][] = $errors[$error] ?? 'Unknown error.';
                     continue;
                 }
-                $keys[] = $stringify($k);
-                $values[] = $stringify('data:' . $_FILES['values']['type'][$k] . ';base64,' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k])));
+                $keys[] = $safe($k, 1);
+                $values[] = $safe('data:' . $_FILES['values']['type'][$k] . ';base64,' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k])) . '#' . urlencode($v));
             }
-            $stmt = 'INSERT INTO ' . $stringify($table = $_POST['table']) . ' (' . implode(', ', $keys) . ') VALUES (' . implode(', ', $values) . ')';
+            $stmt = 'INSERT INTO ' . $safe($table = $_POST['table'], 1) . ' (' . implode(', ', $keys) . ') VALUES (' . implode(', ', $values) . ')';
             Base::query($stmt)->get();
             $_SESSION[$SESSION][] = 'Inserted 1 row to table <code>' . $table . '</code>.';
             if ($DEBUG) {
@@ -301,6 +377,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
+            'column' => null,
             'part' => null,
             'row' => null,
             'sort' => null,
@@ -308,7 +385,8 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             'task' => null
         ]));
         exit;
-    } else if ('update' === $task) {
+    }
+    if ('update' === $task) {
         try {
             $values = [];
             foreach ($_POST['values'] ?? [] as $k => $v) {
@@ -318,7 +396,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 if (is_array($v) && (array_key_exists('date', $v) || array_key_exists('time', $v))) {
                     $v = trim(implode(' ', $v));
                 }
-                $values[] = $stringify($k) . ' = ' . (is_numeric($v) ? $v : $stringify($v));
+                $values[] = $safe($k, 1) . ' = ' . $safe($v);
             }
             $errors = [
                 0 => 'There is no error, the file uploaded with success.',
@@ -336,9 +414,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                     $_SESSION[$SESSION][] = $errors[$error] ?? 'Unknown error.';
                     continue;
                 }
-                $values[] = $stringify($k) . ' = ' . $stringify('data:' . $_FILES['values']['type'][$k] . ';base64,' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k])));
+                $values[] = $safe($k, 1) . ' = ' . $safe('data:' . $_FILES['values']['type'][$k] . ';base64,' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k])) . '#' . urlencode($v));
             }
-            $stmt = 'UPDATE ' . $stringify($table = $_POST['table']) . ' SET ' . implode(', ', $values) . ' WHERE ' . $stringify($column = $_POST['column'] ?? 'rowid') . ' = ' . $stringify($row = $_POST['row']);
+            $stmt = 'UPDATE ' . $safe($table = $_POST['table'], 1) . ' SET ' . implode(', ', $values) . ' WHERE ' . $safe($column = $_POST['column'] ?? 'rowid', 1) . ' = ' . $safe($row = $_POST['row']);
             Base::query($stmt)->get();
             $_SESSION[$SESSION][] = 'Updated 1 row with ID <code>' . $row . '</code> in table <code>' . $table . '</code>.';
             if ($DEBUG) {
@@ -352,6 +430,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
+            'column' => null,
             'part' => null,
             'row' => null,
             'sort' => null,
@@ -575,6 +654,7 @@ th {
 [role='alert'] {
   background: #fe9;
   padding: .5em .75em;
+  word-wrap: break-word;
 }
 [role='status'] {
   color: #f00;
@@ -592,16 +672,14 @@ main {
   order: 2;
   overflow: auto;
 }
-:disabled {
+:disabled,
+[role='button']:not([href]) {
   cursor: not-allowed;
   opacity: .5;
 }
 :focus:invalid {
   color: #f00;
   outline-color: #f00;
-}
-[hidden] {
-  display: none !important;
 }
 tr[data-type="NULL"] .column-rule\:not-null,
 tr[data-type="NULL"] .column-rule\:not-null + br,
@@ -644,16 +722,89 @@ $out .= '<main>';
 $task = $_GET['task'] ?? null;
 
 if (!empty($_GET['table'])) {
-    $name = $stringify($_GET['table']);
+    $name = $safe($_GET['table'], 1);
     $columns = Base::query('PRAGMA table_info(' . $name . ')')->get();
     if ('alter' === $task) {
-        $out .= '<p>';
-        $out .= '<input autofocus name="table[to]" placeholder=' . $name . ' pattern="' . $PATTERN_TABLE . '" required type="text" value=' . $name . '>';
-        $out .= '<button name="task" title="Rename Table" type="submit" value="alter">';
-        $out .= 'Rename';
-        $out .= '</button>';
-        $out .= '</p>';
-        $out .= '<input name="table[from]" type="hidden" value=' . $name . '>';
+        if (!empty($_GET['column'])) {
+            $column = $safe($_GET['column'], 1);
+            $found = false;
+            foreach ($columns as $v) {
+                if ('"' . $v->name . '"' === $column) {
+                    $found = true;
+                    break;
+                }
+            }
+            if ($found) {
+                $out .= '<h3>';
+                $out .= 'Column';
+                $out .= '</h3>';
+                $out .= '<p>';
+                $out .= '<input autofocus name="column[to]" placeholder=' . $column . ' pattern="' . $PATTERN_TABLE_COLUMN . '" required type="text" value=' . $column . '>';
+                $out .= '</p>';
+                $out .= '<p>';
+                $out .= '<button name="alter" type="submit" value="1">';
+                $out .= 'Update';
+                $out .= '</button>';
+                $out .= ' ';
+                $out .= '<button name="alter" type="submit" value="0">';
+                $out .= 'Delete';
+                $out .= '</button>';
+                $out .= '</p>';
+                $out .= '<input name="task" type="hidden" value="alter">';
+            } else {
+                $out .= '<p>';
+                $out .= 'Column <code>' . trim($column, '"') . '</code> does not exist.';
+                $out .= '</p>';
+            }
+            $out .= '<input name="column[from]" type="hidden" value=' . $column . '>';
+            $out .= '<input name="table" type="hidden" value=' . $name . '>';
+        } else {
+            $out .= '<h3>';
+            $out .= 'Table';
+            $out .= '</h3>';
+            $out .= '<p>';
+            $out .= '<input autofocus name="table[to]" placeholder=' . $name . ' pattern="' . $PATTERN_TABLE . '" required type="text" value=' . $name . '>';
+            $out .= '</p>';
+            $out .= '<p>';
+            $out .= '<button name="alter" type="submit" value="1">';
+            $out .= 'Update';
+            $out .= '</button>';
+            $out .= '</p>';
+            $out .= '<h3>';
+            $out .= 'Columns';
+            $out .= '</h3>';
+            $out .= '<ul>';
+            foreach ($columns as $v) {
+                $column = $v->name;
+                $out .= '<li>';
+                $out .= '<a href="' . $path() . $query([
+                    'chunk' => null,
+                    'column' => $column,
+                    'part' => null,
+                    'row' => null,
+                    'sort' => null,
+                    'table' => trim($name, '"'),
+                    'task' => 'alter'
+                ]) . '">';
+                $out .= $column;
+                if (!empty($v->pk)) {
+                    $out .= '<small aria-label="Primary Key" role="status">';
+                    $out .= '*';
+                    $out .= '</small>';
+                }
+                $out .= '</a>';
+                $out .= '</li>';
+            }
+            $out .= '</ul>';
+            $out .= '<p>';
+            // TODO
+            $out .= '<a role="button">';
+            $out .= 'Add';
+            $out .= '</a>';
+            $out .= '</p>';
+            $out .= '<input name="table[from]" type="hidden" value=' . $name . '>';
+            $out .= '<input name="task" type="hidden" value="alter">';
+        }
     } else if ('insert' === $task) {
         $out .= '<table>';
         $out .= '<tbody>';
@@ -664,6 +815,7 @@ if (!empty($_GET['table'])) {
             }
             $d = $v->dflt_value ?? "";
             $n = $v->name;
+            $r = !empty($v->notnull);
             $t = $v->type;
             if ($d) {
                 if (0 === strpos($d, '"')) {
@@ -678,7 +830,7 @@ if (!empty($_GET['table'])) {
             $out .= '</th>';
             $out .= '<td>';
             if ('BLOB' === $t) {
-                $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" type="file">';
+                $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']"' . ($r ? ' required' : "") . ' type="file">';
             } else if ('INTEGER' === $t) {
                 if ('FALSE' === $d || 'TRUE' === $d) {
                     $out .= '<label>';
@@ -697,25 +849,25 @@ if (!empty($_GET['table'])) {
                     $out .= '</span>';
                     $out .= '</label>';
                 } else {
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '" step="1" type="number">';
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' step="1" type="number">';
                 }
             } else if ("" === $t || 'NULL' === $t) {
                 $out .= '<code>';
                 $out .= 'NULL';
                 $out .= '</code>';
             } else if ('REAL' === $t) {
-                $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '" step="0.01" type="number">';
+                $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' step="0.01" type="number">';
             } else {
                 if ('CURRENT_DATE' === $d) {
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]" type="date" value="' . date('Y-m-d') . '">';
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . date('Y-m-d') . '">';
                 } else if ('CURRENT_TIME' === $d) {
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]" type="time" value="' . date('H:m:s') . '">';
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . date('H:m:s') . '">';
                 } else if ('CURRENT_TIMESTAMP' === $d) {
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]" type="date" value="' . date('Y-m-d') . '">';
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . date('Y-m-d') . '">';
                     $out .= ' ';
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]" type="time" value="' . date('H:m:s') . '">';
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . date('H:m:s') . '">';
                 } else {
-                    $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '">';
+                    $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . '>';
                     $out .= '</textarea>';
                 }
             }
@@ -730,7 +882,7 @@ if (!empty($_GET['table'])) {
         $out .= 'Insert';
         $out .= '</button>';
         $out .= '</p>';
-        $out .= '<input name="table" type="hidden" value=' . $stringify($_GET['table']) . '>';
+        $out .= '<input name="table" type="hidden" value=' . $name . '>';
     } else if (array_key_exists('row', $_GET)) {
         if ($row = Base::table(trim($name, '"'))->find($_GET['row'] ?? 0, $_GET['column'] ?? 'rowid')) {
             $out .= '<table>';
@@ -742,6 +894,7 @@ if (!empty($_GET['table'])) {
                 }
                 $d = $v->dflt_value ?? "";
                 $n = $v->name;
+                $r = !empty($v->notnull);
                 $t = $v->type;
                 if ($d) {
                     if (0 === strpos($d, '"')) {
@@ -756,7 +909,7 @@ if (!empty($_GET['table'])) {
                 $out .= '</th>';
                 $out .= '<td>';
                 if ('BLOB' === $t) {
-                    if (preg_match('/^data:([^\/]+)\/([^;]+);base64,(.*)$/', $row->{$n}, $m)) {
+                    if (preg_match('/^data:([^\/]+)\/([^;]+);base64,([^#]+)(?:#(.*))?$/', $row->{$n}, $m)) {
                         $out .= '<p>';
                         if ('image' === $m[1]) {
                             if (extension_loaded('gd')) {
@@ -783,22 +936,26 @@ if (!empty($_GET['table'])) {
                                     imagewebp($gd, null, 100);
                                 }
                                 $buffer = ob_get_clean();
-                                $out .= '<a href="' . $row->{$n} . '" target="_blank">';
                                 $out .= '<img alt="" src="data:' . $m[1] . '/' . $m[2] . ';base64,' . base64_encode($buffer) . '">';
-                                $out .= '</a>';
+                                if (isset($m[4])) {
+                                    $out .= '<br>';
+                                    $out .= '<small>';
+                                    $out .= $m[4];
+                                    $out .= '</small>';
+                                }
                             } else {
                                 $out .= '<small role="status">';
                                 $out .= 'Missing <a href="https://www.php.net/manual/en/book.image.php" rel="nofollow" target="_blank">GD</a> extension.';
                                 $out .= '</small>';
                             }
                         } else {
-                            $out .= '<code>';
-                            $out .= 'data:' . $m[1] . '/' . $m[2] . ';base64,' . substr($m[3], 0, $EXCERPT) . '&hellip;';
-                            $out .= '</code>';
+                            $out .= '&#x1f4c4;';
+                            $out .= ' ';
+                            $out .= $m[4];
                         }
                         $out .= '</p>';
                     }
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" type="file">';
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']"' . ($r ? ' required' : "") . ' type="file">';
                 } else if ('INTEGER' === $t) {
                     if ('FALSE' === $d || 'TRUE' === $d) {
                         $out .= '<label>';
@@ -817,26 +974,26 @@ if (!empty($_GET['table'])) {
                         $out .= '</span>';
                         $out .= '</label>';
                     } else {
-                        $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '" step="1" type="number" value="' . htmlspecialchars($row->{$n} ?? "") . '">';
+                        $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' step="1" type="number" value="' . htmlspecialchars($row->{$n} ?? "") . '">';
                     }
                 } else if ("" === $t || 'NULL' === $t) {
                     $out .= '<code>';
                     $out .= 'NULL';
                     $out .= '</code>';
                 } else if ('REAL' === $t) {
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '" step="0.01" type="number" value="' . htmlspecialchars($row->{$n} ?? "") . '">';
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' step="0.01" type="number" value="' . htmlspecialchars($row->{$n} ?? "") . '">';
                 } else {
                     if ('CURRENT_DATE' === $d) {
-                        $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]" type="date" value="' . htmlspecialchars($row->{$n}) . '">';
+                        $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . htmlspecialchars($row->{$n}) . '">';
                     } else if ('CURRENT_TIME' === $d) {
-                        $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]" type="time" value="' . htmlspecialchars($row->{$n}) . '">';
+                        $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . htmlspecialchars($row->{$n}) . '">';
                     } else if ('CURRENT_TIMESTAMP' === $d) {
                         [$date, $time] = explode(' ', $row->{$n}, 2);
-                        $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]" type="date" value="' . htmlspecialchars($date) . '">';
+                        $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . htmlspecialchars($date) . '">';
                         $out .= ' ';
-                        $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]" type="time" value="' . htmlspecialchars($time) . '">';
+                        $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . htmlspecialchars($time) . '">';
                     } else {
-                        $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '">';
+                        $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . '>';
                         $out .= htmlspecialchars($row->{$n} ?? "");
                         $out .= '</textarea>';
                     }
@@ -856,9 +1013,9 @@ if (!empty($_GET['table'])) {
             $out .= 'Delete';
             $out .= '</button>';
             $out .= '</p>';
-            $out .= '<input name="column" type="hidden" value=' . $stringify($_GET['column'] ?? 'rowid') . '>';
-            $out .= '<input name="row" type="hidden" value=' . $stringify($_GET['row']) . '>';
-            $out .= '<input name="table" type="hidden" value=' . $stringify($_GET['table']) . '>';
+            $out .= '<input name="column" type="hidden" value=' . $safe($_GET['column'] ?? 'rowid', 1) . '>';
+            $out .= '<input name="row" type="hidden" value=' . $safe($_GET['row'], 1) . '>';
+            $out .= '<input name="table" type="hidden" value=' . $name . '>';
         } else {
             $out .= '<p>';
             $out .= 'Could not find a row with ID <code>' . $_GET['row'] . '</code> in table <code>' . trim($name, '"') . '</code>.';
@@ -878,6 +1035,7 @@ if (!empty($_GET['table'])) {
         $out .= '<p>';
         $out .= '<a href="' . $path() . $query([
             'chunk' => null,
+            'column' => null,
             'part' => null,
             'row' => null,
             'sort' => null,
@@ -889,6 +1047,7 @@ if (!empty($_GET['table'])) {
         $out .= ' ';
         $out .= '<a href="' . $path() . $query([
             'chunk' => null,
+            'column' => null,
             'part' => null,
             'row' => null,
             'sort' => null,
@@ -915,7 +1074,7 @@ if (!empty($_GET['table'])) {
             if ($p = (int) $v->pk) {
                 $keys[$n] = $p;
             }
-            $fields[] = 'SUBSTR(' . $stringify($n) . ', 1, ' . $EXCERPT . ') AS ' . $stringify($n);
+            $fields[] = 'CASE WHEN INSTR(' . $safe($n, 1) . ', "data:") = 1 AND INSTR(' . $safe($n, 1) . ', ";base64,") THEN "&#x1f4c4; " || SUBSTR(' . $safe($n, 1) . ', INSTR(' . $safe($n, 1) . ', "#") + 1) WHEN LENGTH(' . $safe($n, 1) . ') > ' . $EXCERPT . ' THEN SUBSTR(' . $safe($n, 1) . ', 1, ' . $EXCERPT . ') || "..." ELSE ' . $safe($n, 1) . ' END AS ' . $safe($n, 1);
             $out .= '<th>';
             $out .= '<a' . ($n === ($_GET['sort'][1] ?? $key) ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
                 'sort' => [1 === ($_GET['sort'][0] ?? -1) ? -1 : 1, $n]
@@ -946,7 +1105,7 @@ if (!empty($_GET['table'])) {
         if (0 === $rows) {
             $out .= '<tr>';
             $out .= '<td colspan="' . ($columns + 1) . '" style="text-align: center;">';
-            $out .= '<i aria-label="No rows yet." role="status">';
+            $out .= '<i aria-label="Empty Table" role="status">';
             $out .= 'EMPTY';
             $out .= '</i>';
             $out .= '</td>';
@@ -958,11 +1117,17 @@ if (!empty($_GET['table'])) {
                 $ref = $keys;
                 $keys = ['rowid' => 1];
             }
-            $rows = Base::query('SELECT ' . implode(', ', $fields) . ' FROM ' . $name . ' ORDER BY ' . $stringify($_GET['sort'][1] ?? 'rowid') . ' ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? $CHUNK) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
+            $rows = Base::query('SELECT ' . implode(', ', $fields) . ' FROM ' . $name . ' ORDER BY ' . $safe($_GET['sort'][1] ?? 'rowid', 1) . ' ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? $CHUNK) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
             foreach ($rows as $row) {
                 $out .= '<tr>';
                 foreach ($row as $k => $v) {
                     $out .= '<td>';
+                    if (0 === strpos($v, '#') && 7 === strlen($v) && ctype_xdigit(substr($v, 1))) {
+                        $hex = true;
+                        $out .= '<span style="background: ' . $v . '; border: 1px solid #808080; display: inline-block; height: 1.25em; vertical-align: middle; width: 1.25em;"></span>';
+                        $out .= ' ';
+                        $out .= '<span style="display: inline-block; vertical-align: middle;">';
+                    }
                     if (!empty($keys[$k])) {
                         $out .= '<a href="' . $path() . $query([
                             'chunk' => null,
@@ -978,18 +1143,26 @@ if (!empty($_GET['table'])) {
                         if ($has_primary_key_alias && !empty($ref[$k])) {
                             $out .= $row->rowid ?? '?';
                         } else {
-                            $out .= '<i aria-label="Null value" role="status">';
+                            $out .= '<i aria-label="Null Value" role="status">';
                             $out .= 'NULL';
                             $out .= '</i>';
                         }
                     } else if ("" === $v) {
-                        $out .= '<i aria-label="Empty string value" role="status">';
+                        $out .= '<i aria-label="Empty String Value" role="status">';
                         $out .= 'EMPTY';
                         $out .= '</i>';
                     }
-                    $out .= $EXCERPT === strlen($v) ? htmlspecialchars($v) . '&hellip;' : htmlspecialchars($v);
+                    $v = htmlspecialchars($v);
+                    if (0 === strpos($v, '&amp;#x')) {
+                        $v = strtr($v, ['&amp;#x' => '&#x']);
+                    }
+                    $v = strtr($v, ['...' => '&hellip;']);
+                    $out .= $v;
                     if (!empty($keys[$k])) {
                         $out .= '</a>';
+                    }
+                    if (!empty($hex)) {
+                        $out .= '</span>';
                     }
                     $out .= '</td>';
                 }
@@ -1240,23 +1413,25 @@ $out .= '</h3>';
 if ($tables = Base::query('SELECT "name" FROM "sqlite_master" WHERE "type" = "table" AND "name" NOT LIKE "sqlite_%" ORDER BY "name" ASC')->get()) {
     $out .= '<ul>';
     foreach ($tables as $table) {
+        $n = $table->name;
         $out .= '<li>';
-        $out .= '<a' . ($table->name === ($_GET['table'] ?? "") ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
+        $out .= '<a' . ($n === ($_GET['table'] ?? "") ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
             'chunk' => null,
+            'column' => null,
             'part' => null,
             'row' => null,
             'sort' => null,
-            'table' => $table->name,
+            'table' => $n,
             'task' => null
         ]) . '">';
-        $out .= $table->name;
+        $out .= $n;
         $out .= '</a>';
         $out .= '</li>';
     }
     $out .= '</ul>';
 } else {
     $out .= '<p>';
-    $out .= '<i aria-label="Empty data" role="status">';
+    $out .= '<i aria-label="Empty Data" role="status">';
     $out .= 'EMPTY';
     $out .= '</i>';
     $out .= '</p>';
@@ -1266,6 +1441,7 @@ if (!isset($_GET['task'])) {
     $out .= '<p>';
     $out .= '<a href="' . $path() . $query([
         'chunk' => null,
+        'column' => null,
         'part' => null,
         'row' => null,
         'sort' => null,
