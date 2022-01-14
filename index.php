@@ -28,11 +28,13 @@ array_walk_recursive($any, static function(&$v) use($values) {
     }
 });
 
+$DEBUG = true;
+
 $FILE = __DIR__ . '/table.db';
 $PATTERN_TABLE = "^[A-Z][a-z\\d]*(?:_?[A-Z\\d][a-z\\d]*)*$";
 $PATTERN_TABLE_COLUMN = "^[A-Za-z][A-Za-z\\d]*(?:_?[A-Za-z\\d][a-z\\d]*)*$";
 $SESSION = 'STATUS';
-$TRUNCATE = 50;
+$TRUNCATE = 40;
 
 $PATH = trim(strtr(strtr(__DIR__ . '/', "\\", '/'), [strtr($_SERVER['DOCUMENT_ROOT'], "\\", '/') => '/']), '/');
 $PATH = "" !== $PATH ? '/' . $PATH . '/index.php' : '/index.php';
@@ -132,10 +134,14 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         try {
             Base::query($stmt = 'DROP TABLE ' . $stringify($table = $_POST['drop']))->get();
             $_SESSION[$SESSION][] = 'Dropped table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not drop table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            }
         }
         header('location: ' . $path());
         exit;
@@ -171,10 +177,14 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         try {
             Base::query($stmt)->get();
             $_SESSION[$SESSION][] = 'Created table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not create table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            }
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
@@ -189,10 +199,14 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         try {
             Base::query($stmt = 'DELETE FROM ' . $stringify($table = $_POST['table']) . ' WHERE "rowid" = ' . ($row = $_POST['row']))->get();
             $_SESSION[$SESSION][] = 'Deleted 1 row with ID <code>' . $row . '</code> from table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not delete row with ID <code>' . $row . '</code> from table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            }
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
@@ -207,16 +221,42 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         try {
             $keys = $values = [];
             foreach ($_POST['values'] ?? [] as $k => $v) {
+                if (isset($_FILES['values']['name'][$k])) {
+                    continue;
+                }
                 $keys[] = $stringify($k);
                 $values[] = is_numeric($v) ? $v : $stringify($v);
+            }
+            $errors = [
+                0 => 'There is no error, the file uploaded with success.',
+                1 => 'The uploaded file exceeds the <code>upload_max_filesize</code> directive in <code>php.ini</code>.',
+                2 => 'The uploaded file exceeds the <code>MAX_FILE_SIZE</code> directive that was specified in the HTML form.',
+                3 => 'The uploaded file was only partially uploaded.',
+                4 => 'No file was uploaded.',
+                6 => 'Missing a temporary folder.',
+                7 => 'Failed to write file to disk.',
+                8 => 'A PHP extension stopped the file upload.',
+            ];
+            foreach ($_FILES['values']['name'] ?? [] as $k => $v) {
+                $error = $_FILES['values']['error'][$k] ?? -1;
+                if (!empty($error)) {
+                    $_SESSION[$SESSION][] = $errors[$error] ?? 'Unknown error.';
+                    continue;
+                }
+                $keys[] = $stringify($k);
+                $values[] = $stringify('data:' . $_FILES['values']['type'][$k] . ';base64,' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k])));
             }
             $stmt = 'INSERT INTO ' . $stringify($table = $_POST['table']) . ' (' . implode(', ', $keys) . ') VALUES (' . implode(', ', $values) . ')';
             Base::query($stmt)->get();
             $_SESSION[$SESSION][] = 'Inserted 1 row to table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not insert row to table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            }
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
@@ -231,15 +271,40 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         try {
             $values = [];
             foreach ($_POST['values'] ?? [] as $k => $v) {
+                if (isset($_FILES['values']['name'][$k])) {
+                    continue;
+                }
                 $values[] = $stringify($k) . ' = ' . (is_numeric($v) ? $v : $stringify($v));
+            }
+            $errors = [
+                0 => 'There is no error, the file uploaded with success.',
+                1 => 'The uploaded file exceeds the <code>upload_max_filesize</code> directive in <code>php.ini</code>.',
+                2 => 'The uploaded file exceeds the <code>MAX_FILE_SIZE</code> directive that was specified in the HTML form.',
+                3 => 'The uploaded file was only partially uploaded.',
+                4 => 'No file was uploaded.',
+                6 => 'Missing a temporary folder.',
+                7 => 'Failed to write file to disk.',
+                8 => 'A PHP extension stopped the file upload.',
+            ];
+            foreach ($_FILES['values']['name'] ?? [] as $k => $v) {
+                $error = $_FILES['values']['error'][$k] ?? -1;
+                if (!empty($error)) {
+                    $_SESSION[$SESSION][] = $errors[$error] ?? 'Unknown error.';
+                    continue;
+                }
+                $values[] = $stringify($k) . ' = ' . $stringify('data:' . $_FILES['values']['type'][$k] . ';base64,' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k])));
             }
             $stmt = 'UPDATE ' . $stringify($table = $_POST['table']) . ' SET ' . implode(', ', $values) . ' WHERE "rowid" = ' . ($row = $_POST['row']);
             Base::query($stmt)->get();
             $_SESSION[$SESSION][] = 'Updated 1 row with ID <code>' . $row . '</code> in table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not update row with ID <code>' . $row . '</code> in table <code>' . $table . '</code>.';
-            $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+            }
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
@@ -311,6 +376,7 @@ button {
   color: inherit;
   cursor: pointer;
   display: inline-block;
+  font: inherit;
   font-weight: normal;
   padding: .25em .5em;
   text-decoration: none;
@@ -319,6 +385,25 @@ button {
 a[role='button']:focus,
 button:focus,
 select:focus {
+  border-color: #00f;
+  outline-offset: -4px;
+  outline: 1px solid #00f;
+}
+::file-selector-button {
+  background: #def;
+  border: 2px solid #000;
+  color: inherit;
+  cursor: pointer;
+  display: inline-block;
+  font: inherit;
+  font-weight: normal;
+  margin-inline-end: .5em;
+  padding: .25em .5em;
+  text-decoration: none;
+  vertical-align: middle;
+}
+:focus::file-selector-button,
+::file-selector-button:focus {
   border-color: #00f;
   outline-offset: -4px;
   outline: 1px solid #00f;
@@ -337,8 +422,8 @@ select,
 textarea {
   background: #fff;
   border: 2px solid #000;
-  position: relative;
   display: inline-block;
+  font: inherit;
   font-family: monospace;
   font-weight: normal;
   padding: .25em .5em;
@@ -438,6 +523,7 @@ th {
   padding: .5em;
   text-align: left;
   vertical-align: top;
+  white-space: nowrap;
 }
 th {
   background: #fed;
@@ -591,6 +677,40 @@ if (!empty($_GET['table'])) {
                 $out .= '</th>';
                 $out .= '<td>';
                 if ('BLOB' === $t) {
+                    if (preg_match('/^data:([^\/]+)\/([^;]+);base64,(.*)$/', $row->{$n}, $m)) {
+                        $out .= '<p>';
+                        if ('image' === $m[1]) {
+                            if (extension_loaded('gd')) {
+                                $gd = imagecreatefromstring(base64_decode($m[3]));
+                                if (imagesx($gd) > 320) {
+                                    $gd = imagescale($gd, 320, -1, IMG_NEAREST_NEIGHBOUR);
+                                }
+                                ob_start();
+                                if ('gif' === $m[2]) {
+                                    imagegif($gd);
+                                } else if ('jpeg' === $m[2] || 'jpg' === $m[2]) {
+                                    imagejpeg($gd, null, 100);
+                                } else if ('png' === $m[2]) {
+                                    imagepng($gd, null, 9);
+                                } else if ('webp' === $m[2]) {
+                                    imagewebp($gd, null, 100);
+                                }
+                                $buffer = ob_get_clean();
+                                $out .= '<a href="' . $row->{$n} . '" target="_blank">';
+                                $out .= '<img alt="" src="data:' . $m[1] . '/' . $m[2] . ';base64,' . base64_encode($buffer) . '">';
+                                $out .= '</a>';
+                            } else {
+                                $out .= '<small role="status">';
+                                $out .= 'Missing <a href="https://www.php.net/manual/en/book.image.php" rel="nofollow" target="_blank">GD</a> extension.';
+                                $out .= '</small>';
+                            }
+                        } else {
+                            $out .= '<code>';
+                            $out .= 'data:' . $m[1] . '/' . $m[2] . ';base64,' . substr($m[3], 0, $TRUNCATE) . '&hellip;';
+                            $out .= '</code>';
+                        }
+                        $out .= '</p>';
+                    }
                     $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" type="file">';
                 } else if ('INTEGER' === $t) {
                     $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '" step="1" type="number" value="' . htmlspecialchars($row->{$n} ?? "") . '">';
@@ -660,8 +780,10 @@ if (!empty($_GET['table'])) {
             $out .= '</th>';
         }
 
+        $keys = array_filter($keys);
+
         // Has 0 or more than 1 primary key(s)!
-        if ($has_primary_key_alias = !$keys || count(array_filter($keys)) > 1) {
+        if ($has_primary_key_alias = 0 === count($keys) || count($keys) > 1) {
             $out .= '<th>';
             $out .= 'rowid';
             $out .= '<small aria-label="Primary Key" role="status">';
@@ -851,13 +973,13 @@ JS;
         $out .= '</p>';
         $out .= '<template id="column">';
         $out .= '<tr data-type="TEXT">';
-        $out .= '<th scope="row" style="width: 1px; white-space: nowrap;">';
+        $out .= '<th scope="row" style="width: 1px;">';
         $out .= '<button class="remove" title="Remove Column" type="button">';
         $out .= '&minus;';
         $out .= '</button>';
         $out .= '<input name="columns[][key]" placeholder="fooBarBaz" pattern="' . $PATTERN_TABLE_COLUMN . '" required type="text">';
         $out .= '</th>';
-        $out .= '<td style="width: 1px; white-space: nowrap;">';
+        $out .= '<td style="width: 1px;">';
         $out .= '<button class="reset" title="Clear Value" type="button">';
         $out .= '&times;';
         $out .= '</button>';
