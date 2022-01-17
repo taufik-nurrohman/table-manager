@@ -262,6 +262,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             $type = $v['type'];
             $value = $v['value'];
             foreach ($v['rule'] ?? [] as $kk => $vv) {
+                if ('CHECK' === $kk && is_array($vv)) {
+                    $kk = 'CHECK(' . sprintf(implode(' AND ', array_keys($vv)), $safe($key, 1)) . ')';
+                }
                 $rules .= ' ' . $kk;
             }
             $value = in_array($value, $options, true) ? $value : $safe($value);
@@ -281,6 +284,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             foreach ($_POST['primary'] ?? [] as $k => $v) {
                 $keys[] = $safe($k, 1);
             }
+            sort($keys);
             $primary = $keys ? ', PRIMARY KEY(' . implode(', ', $keys) . ')' : "";
             $stmt .= ' (' . implode(', ', $columns) . $primary . ')';
         }
@@ -339,7 +343,13 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                     continue;
                 }
                 $keys[] = $safe($k, 1);
-                if (is_array($v) && (array_key_exists('date', $v) || array_key_exists('time', $v))) {
+                if (is_array($v)) {
+                    if (array_key_exists('date', $v)) {
+                        $v['date'] = $v['date'] ?: date('Y-m-d');
+                    }
+                    if (array_key_exists('time', $v)) {
+                        $v['time'] = $v['time'] ?: date('H:i:s');
+                    }
                     $v = trim(implode(' ', $v));
                 }
                 $values[] = $safe($v);
@@ -393,7 +403,13 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 if (isset($_FILES['values']['name'][$k])) {
                     continue;
                 }
-                if (is_array($v) && (array_key_exists('date', $v) || array_key_exists('time', $v))) {
+                if (is_array($v)) {
+                    if (array_key_exists('date', $v)) {
+                        $v['date'] = $v['date'] ?: date('Y-m-d');
+                    }
+                    if (array_key_exists('time', $v)) {
+                        $v['time'] = $v['time'] ?: date('H:i:s');
+                    }
                     $v = trim(implode(' ', $v));
                 }
                 $values[] = $safe($k, 1) . ' = ' . $safe($v);
@@ -538,6 +554,7 @@ code {
 i {
   font-style: italic;
 }
+input[type='color'],
 input[type='date'],
 input[type='number'],
 input[type='search'],
@@ -559,6 +576,24 @@ textarea {
   height: 12em;
   resize: vertical;
   width: 100%;
+}
+input[maxlength='255'] {
+  width: 100%;
+}
+input[type='color'] {
+  cursor: pointer;
+  height: 2em;
+  padding: 0;
+  width: 2em;
+}
+::-moz-color-swatch {
+  border: 0;
+}
+::-webkit-color-swatch {
+  border: 0;
+}
+::-webkit-color-swatch-wrapper {
+  padding: 0;
 }
 input[type='checkbox'],
 input[type='radio'] {
@@ -606,9 +641,6 @@ label > input + span {
   display: inline-block;
   vertical-align: middle;
 }
-label + label {
-  margin-left: .5em;
-}
 form,
 h3,
 hr,
@@ -639,7 +671,7 @@ table {
 }
 tbody:empty + tfoot {
   display: none;
-  }
+}
 td,
 th {
   border: 1px solid;
@@ -655,6 +687,23 @@ th {
   background: #fe9;
   padding: .5em .75em;
   word-wrap: break-word;
+}
+[role='group'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5em;
+  margin: 0;
+}
+[role='note'] {
+  background: #ccc;
+  margin: 0 0 1em;
+  padding: 1em;
+}
+[role='note'] + hr {
+  display: none;
+}
+[role='note'] :last-child {
+  margin-bottom: 0;
 }
 [role='status'] {
   color: #f00;
@@ -724,6 +773,8 @@ $task = $_GET['task'] ?? null;
 if (!empty($_GET['table'])) {
     $name = $safe($_GET['table'], 1);
     $columns = Base::query('PRAGMA table_info(' . $name . ')')->get();
+    $sql = Base::query('SELECT "sql" FROM "sqlite_master" WHERE "tbl_name" = ' . $name)->first()->sql ?? "";
+    $sql = substr($sql, strpos($sql, '('));
     if ('alter' === $task) {
         if (!empty($_GET['column'])) {
             $column = $safe($_GET['column'], 1);
@@ -833,6 +884,7 @@ if (!empty($_GET['table'])) {
                 $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']"' . ($r ? ' required' : "") . ' type="file">';
             } else if ('INTEGER' === $t) {
                 if ('FALSE' === $d || 'TRUE' === $d) {
+                    $out .= '<span role="group">';
                     $out .= '<label>';
                     $out .= '<input' . ('TRUE' === $d ? ($first ? ' autofocus' : "") . ' checked' : "") . ' name="values[' . $n . ']" type="radio" value="1">';
                     $out .= ' ';
@@ -848,6 +900,7 @@ if (!empty($_GET['table'])) {
                     $out .= 'No';
                     $out .= '</span>';
                     $out .= '</label>';
+                    $out .= '</span>';
                 } else {
                     $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' step="1" type="number">';
                 }
@@ -858,17 +911,24 @@ if (!empty($_GET['table'])) {
             } else if ('REAL' === $t) {
                 $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' step="0.01" type="number">';
             } else {
-                if ('CURRENT_DATE' === $d) {
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . date('Y-m-d') . '">';
-                } else if ('CURRENT_TIME' === $d) {
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . date('H:m:s') . '">';
-                } else if ('CURRENT_TIMESTAMP' === $d) {
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . date('Y-m-d') . '">';
+                if ('CURRENT_DATE' === $d || preg_match('/^[1-9]\d{3,}-(0\d|1[0-2])-(0\d|[1-2]\d|3[0-1])$/', $d)) {
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . ('CURRENT_DATE' !== $d ? $d : date('Y-m-d')) . '">';
+                } else if ('CURRENT_TIME' === $d || preg_match('/^([0-1]\d|2[0-4]):([0-5]\d|60):([0-5]\d|60)$/', $d)) {
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . ('CURRENT_TIME' !== $d ? $d : date('H:m:s')) . '">';
+                } else if ('CURRENT_TIMESTAMP' === $d || preg_match('/^[1-9]\d{3,}-(0\d|1[0-2])-(0\d|[1-2]\d|3[0-1])\s+([0-1]\d|2[0-4]):([0-5]\d|60):([0-5]\d|60)$/', $d)) {
+                    [$date, $time] = explode(' ', 'CURRENT_TIMESTAMP' !== $d ? $d : date('Y-m-d H:i:s'), 2);
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . $date . '">';
                     $out .= ' ';
-                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . date('H:m:s') . '">';
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . $time . '">';
+                } else if (0 === strpos($d, '#') && 7 === strlen($d) && ctype_xdigit(substr($d, 1))) {
+                    $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']"' . ($r ? ' required' : "") . ' type="color" value="' . htmlspecialchars($d) . '">';
                 } else {
-                    $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . '>';
-                    $out .= '</textarea>';
+                    if ($sql && false !== strpos($sql, 'CHECK(LENGTH("' . $n . '") <= 255)')) {
+                        $out .= '<input' . ($first ? ' autofocus' : "") . ' maxlength="255" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' type="text">';
+                    } else {
+                        $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . '>';
+                        $out .= '</textarea>';
+                    }
                 }
             }
             $out .= '</td>';
@@ -958,6 +1018,7 @@ if (!empty($_GET['table'])) {
                     $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']"' . ($r ? ' required' : "") . ' type="file">';
                 } else if ('INTEGER' === $t) {
                     if ('FALSE' === $d || 'TRUE' === $d) {
+                        $out .= '<span role="group">';
                         $out .= '<label>';
                         $out .= '<input' . ('1' === $row->{$n} ? ($first ? ' autofocus' : "") . ' checked' : "") . ' name="values[' . $n . ']" type="radio" value="1">';
                         $out .= ' ';
@@ -973,6 +1034,7 @@ if (!empty($_GET['table'])) {
                         $out .= 'No';
                         $out .= '</span>';
                         $out .= '</label>';
+                        $out .= '</span>';
                     } else {
                         $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' step="1" type="number" value="' . htmlspecialchars($row->{$n} ?? "") . '">';
                     }
@@ -983,19 +1045,25 @@ if (!empty($_GET['table'])) {
                 } else if ('REAL' === $t) {
                     $out .= '<input' . ($first ? ' autofocus' : "") . ' max="9223372036854775807" min="-9223372036854775808" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' step="0.01" type="number" value="' . htmlspecialchars($row->{$n} ?? "") . '">';
                 } else {
-                    if ('CURRENT_DATE' === $d) {
+                    if ('CURRENT_DATE' === $d || preg_match('/^[1-9]\d{3,}-(0\d|1[0-2])-(0\d|[1-2]\d|3[0-1])$/', $d)) {
                         $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . htmlspecialchars($row->{$n}) . '">';
-                    } else if ('CURRENT_TIME' === $d) {
+                    } else if ('CURRENT_TIME' === $d || preg_match('/^([0-1]\d|2[0-4]):([0-5]\d|60):([0-5]\d|60)$/', $d)) {
                         $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . htmlspecialchars($row->{$n}) . '">';
-                    } else if ('CURRENT_TIMESTAMP' === $d) {
+                    } else if ('CURRENT_TIMESTAMP' === $d || preg_match('/^[1-9]\d{3,}-(0\d|1[0-2])-(0\d|[1-2]\d|3[0-1])\s+([0-1]\d|2[0-4]):([0-5]\d|60):([0-5]\d|60)$/', $d)) {
                         [$date, $time] = explode(' ', $row->{$n}, 2);
                         $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][date]"' . ($r ? ' required' : "") . ' type="date" value="' . htmlspecialchars($date) . '">';
                         $out .= ' ';
                         $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . '][time]"' . ($r ? ' required' : "") . ' type="time" value="' . htmlspecialchars($time) . '">';
+                    } else if (0 === strpos($d, '#') && 7 === strlen($d) && ctype_xdigit(substr($d, 1))) {
+                        $out .= '<input' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']"' . ($r ? ' required' : "") . ' type="color" value="' . htmlspecialchars($row->{$n}) . '">';
                     } else {
-                        $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . '>';
-                        $out .= htmlspecialchars($row->{$n} ?? "");
-                        $out .= '</textarea>';
+                        if ($sql && false !== strpos($sql, 'CHECK(LENGTH("' . $n . '") <= 255)')) {
+                            $out .= '<input' . ($first ? ' autofocus' : "") . ' maxlength="255" name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . ' type="text" value="' . htmlspecialchars(substr($row->{$n}, 0, 255)) . '">';
+                        } else {
+                            $out .= '<textarea' . ($first ? ' autofocus' : "") . ' name="values[' . $n . ']" placeholder="' . htmlspecialchars($d) . '"' . ($r ? ' required' : "") . '>';
+                            $out .= htmlspecialchars($row->{$n} ?? "");
+                            $out .= '</textarea>';
+                        }
                     }
                 }
                 $out .= '</td>';
@@ -1123,7 +1191,7 @@ if (!empty($_GET['table'])) {
                 foreach ($row as $k => $v) {
                     $out .= '<td>';
                     if (0 === strpos($v, '#') && 7 === strlen($v) && ctype_xdigit(substr($v, 1))) {
-                        $hex = true;
+                        $as_color = true;
                         $out .= '<span style="background: ' . $v . '; border: 1px solid #808080; display: inline-block; height: 1.25em; vertical-align: middle; width: 1.25em;"></span>';
                         $out .= ' ';
                         $out .= '<span style="display: inline-block; vertical-align: middle;">';
@@ -1161,8 +1229,9 @@ if (!empty($_GET['table'])) {
                     if (!empty($keys[$k])) {
                         $out .= '</a>';
                     }
-                    if (!empty($hex)) {
+                    if (!empty($as_color)) {
                         $out .= '</span>';
+                        unset($as_color);
                     }
                     $out .= '</td>';
                 }
@@ -1233,6 +1302,26 @@ JS;
     }
 } else {
     if ('create' === $task) {
+        $out .= '<div role="note">';
+        $out .= '<h3>';
+        $out .= 'Tips';
+        $out .= '</h3>';
+        $out .= '<ol>';
+        $out .= '<li>';
+        $out .= 'Add a column with type of <code>INTEGER</code> and default value of <code>FALSE</code> or <code>TRUE</code> to generate a toggle field. SQLite does not have native <code>BOOLEAN</code> type <a href="https://www.sqlite.org/datatype3.html#boolean_datatype" rel="nofollow" target="_blank">by design</a>, so the data you provide later will be stored as <code>0</code> for <code>false</code> and <code>1</code> for <code>true</code>.';
+        $out .= '</li>';
+        $out .= '<li>';
+        $out .= 'Add a column with type of <code>TEXT</code> and default value of <code>CURRENT_DATE</code> or <code>CURRENT_TIME</code> or <code>CURRENT_TIMESTAMP</code> to generate a date/time field. SQLite also does not have types to handle date and time data natively, but it does have <a href="https://sqlite.org/syntax/literal-value.html" rel="nofollow" target="_blank">those literals</a> to store the current date and time as <code>INTEGER</code>, <code>REAL</code> or <code>TEXT</code>, depending on the type of column you provide.';
+        $out .= '</li>';
+        $out .= '<li>';
+        $out .= 'Add a column with type of <code>TEXT</code> and default value of RGB color code in HEX format (e.g. <code>#000000</code>) to generate a color field.';
+        $out .= '</li>';
+        $out .= '<li>';
+        $out .= 'Add a column with type of <code>TEXT</code> and select the 255 maximum characters length constraint to generate a text field.';
+        $out .= '</li>';
+        $out .= '</ol>';
+        $out .= '</div>';
+        $out .= '<hr>';
         $out .= '<p>';
         $out .= '<label for="' . ($id = 'f:' . substr(uniqid(), 6)) . '">';
         $out .= 'Table';
@@ -1266,7 +1355,9 @@ JS;
         $out .= '<th scope="row">';
         $out .= 'Primary';
         $out .= '</th>';
-        $out .= '<td colspan="3" id="keys">';
+        $out .= '<td colspan="3">';
+        $out .= '<span id="keys" role="group">';
+        $out .= '</span>';
         $out .= '</td>';
         $out .= '</tr>';
         $out .= '</tfoot>';
@@ -1276,17 +1367,6 @@ JS;
         $out .= 'Create';
         $out .= '</button>';
         $out .= '</p>';
-        $out .= '<h3>';
-        $out .= 'Tips';
-        $out .= '</h3>';
-        $out .= '<ol>';
-        $out .= '<li>';
-        $out .= 'Add a column with type of <code>INTEGER</code> and default value of <code>FALSE</code> or <code>TRUE</code> to generate a toggle field. SQLite does not have native <code>BOOLEAN</code> type <a href="https://www.sqlite.org/datatype3.html#boolean_datatype" rel="nofollow" target="_blank">by design</a>, so the data you provide later will be stored as <code>0</code> for <code>false</code> and <code>1</code> for <code>true</code>.';
-        $out .= '</li>';
-        $out .= '<li>';
-        $out .= 'Add a column with type of <code>TEXT</code> and default value of <code>CURRENT_DATE</code> or <code>CURRENT_TIME</code> or <code>CURRENT_TIMESTAMP</code> to generate a date/time field. SQLite also does not have types to handle date and time data natively, but it does have <a href="https://sqlite.org/syntax/literal-value.html" rel="nofollow" target="_blank">those literals</a> to store the current date and time as <code>INTEGER</code>, <code>REAL</code> or <code>TEXT</code>, depending on the type of column you provide.';
-        $out .= '</li>';
-        $out .= '</ol>';
         $out .= '<template id="column">';
         $out .= '<tr data-type="TEXT">';
         $out .= '<th scope="row" style="width: 1px;">';
@@ -1303,6 +1383,7 @@ JS;
         $out .= '</td>';
         $out .= '<td>';
         $types = ['BLOB', 'INTEGER', 'NULL', 'REAL', 'TEXT'];
+        $out .= '<span role="group">';
         foreach ($types as $type) {
             $out .= '<label class="column-type:' . strtolower($type) . '">';
             $out .= '<input' . ('TEXT' === $type ? ' checked' : "") . ' name="columns[][type]" type="radio" value="' . $type . '">';
@@ -1316,8 +1397,10 @@ JS;
             $out .= ' ';
         }
         $out = rtrim($out);
+        $out .= '</span>';
         $out .= '</td>';
         $out .= '<td>';
+        $out .= '<span role="group">';
         $out .= '<label class="column-rule:not-null">';
         $out .= '<input name="columns[][rule][NOT NULL]" type="checkbox">';
         $out .= ' ';
@@ -1337,6 +1420,17 @@ JS;
         $out .= '</code>';
         $out .= '</span>';
         $out .= '</label>';
+        $out .= ' ';
+        $out .= '<label class="column-rule:check-length-max-255">';
+        $out .= '<input name="columns[][rule][CHECK][LENGTH(%s) &lt;= 255]" type="checkbox">';
+        $out .= ' ';
+        $out .= '<span>';
+        $out .= '<code>';
+        $out .= 'LENGTH(?) &lt;= 255';
+        $out .= '</code>';
+        $out .= '</span>';
+        $out .= '</label>';
+        $out .= '</span>';
         $out .= '</td>';
         $out .= '</tr>';
         $out .= '</template>';

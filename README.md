@@ -14,7 +14,7 @@ Features
 
  - [ ] Add column.
  - [ ] Filter rows.
- - [x] Color preview (HEX).
+ - [x] Color preview.
  - [x] Create table.
  - [x] Delete row.
  - [x] Drop column.
