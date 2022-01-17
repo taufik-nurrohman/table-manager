@@ -694,17 +694,6 @@ th {
   gap: .5em;
   margin: 0;
 }
-[role='note'] {
-  background: #ccc;
-  margin: 0 0 1em;
-  padding: 1em;
-}
-[role='note'] + hr {
-  display: none;
-}
-[role='note'] :last-child {
-  margin-bottom: 0;
-}
 [role='status'] {
   color: #f00;
 }
@@ -730,10 +719,9 @@ main {
   color: #f00;
   outline-color: #f00;
 }
-tr[data-type="NULL"] .column-rule\:not-null,
-tr[data-type="NULL"] .column-rule\:not-null + br,
-tr[data-type="NULL"] .column-rule\:unique,
-tr[data-type="NULL"] .column-rule\:unique + br {
+tr[data-type='NULL'] .column-rule\:check-length-max-255,
+tr[data-type='NULL'] .column-rule\:not-null,
+tr[data-type='NULL'] .column-rule\:unique {
   display: none;
 }
 CSS;
@@ -1302,26 +1290,6 @@ JS;
     }
 } else {
     if ('create' === $task) {
-        $out .= '<div role="note">';
-        $out .= '<h3>';
-        $out .= 'Tips';
-        $out .= '</h3>';
-        $out .= '<ol>';
-        $out .= '<li>';
-        $out .= 'Add a column with type of <code>INTEGER</code> and default value of <code>FALSE</code> or <code>TRUE</code> to generate a toggle field. SQLite does not have native <code>BOOLEAN</code> type <a href="https://www.sqlite.org/datatype3.html#boolean_datatype" rel="nofollow" target="_blank">by design</a>, so the data you provide later will be stored as <code>0</code> for <code>false</code> and <code>1</code> for <code>true</code>.';
-        $out .= '</li>';
-        $out .= '<li>';
-        $out .= 'Add a column with type of <code>TEXT</code> and default value of <code>CURRENT_DATE</code> or <code>CURRENT_TIME</code> or <code>CURRENT_TIMESTAMP</code> to generate a date/time field. SQLite also does not have types to handle date and time data natively, but it does have <a href="https://sqlite.org/syntax/literal-value.html" rel="nofollow" target="_blank">those literals</a> to store the current date and time as <code>INTEGER</code>, <code>REAL</code> or <code>TEXT</code>, depending on the type of column you provide.';
-        $out .= '</li>';
-        $out .= '<li>';
-        $out .= 'Add a column with type of <code>TEXT</code> and default value of RGB color code in HEX format (e.g. <code>#000000</code>) to generate a color field.';
-        $out .= '</li>';
-        $out .= '<li>';
-        $out .= 'Add a column with type of <code>TEXT</code> and select the 255 maximum characters length constraint to generate a text field.';
-        $out .= '</li>';
-        $out .= '</ol>';
-        $out .= '</div>';
-        $out .= '<hr>';
         $out .= '<p>';
         $out .= '<label for="' . ($id = 'f:' . substr(uniqid(), 6)) . '">';
         $out .= 'Table';
@@ -1367,6 +1335,25 @@ JS;
         $out .= 'Create';
         $out .= '</button>';
         $out .= '</p>';
+        $out .= '<hr>';
+        $out .= '<h3>';
+        $out .= 'Tips';
+        $out .= '</h3>';
+        $out .= '<ol>';
+        $out .= '<li>';
+        $out .= 'Add a column with type of <code>INTEGER</code> and default value of <code>FALSE</code> or <code>TRUE</code> to generate a toggle field. SQLite does not have native <code>BOOLEAN</code> type <a href="https://www.sqlite.org/datatype3.html#boolean_datatype" rel="nofollow" target="_blank">by design</a>, so the data you provide later will be stored as <code>0</code> for <code>false</code> and <code>1</code> for <code>true</code>.';
+        $out .= '</li>';
+        $out .= '<li>';
+        $out .= 'Add a column with type of <code>TEXT</code> and default value of <code>CURRENT_DATE</code> or <code>CURRENT_TIME</code> or <code>CURRENT_TIMESTAMP</code> to generate a date/time field. SQLite also does not have types to handle date and time data natively, but it does have <a href="https://sqlite.org/syntax/literal-value.html" rel="nofollow" target="_blank">those literals</a> to store the current date and time as <code>INTEGER</code>, <code>REAL</code> or <code>TEXT</code>, depending on the type of column you provide.';
+        $out .= '</li>';
+        $out .= '<li>';
+        $out .= 'Add a column with type of <code>TEXT</code> and default value of RGB color code in HEX format (e.g. <code>#000000</code>) to generate a color field.';
+        $out .= '</li>';
+        $out .= '<li>';
+        $out .= 'Add a column with type of <code>TEXT</code> and select the 255 maximum characters length constraint to generate a text field.';
+        $out .= '</li>';
+        $out .= '</ol>';
+        $out .= '<hr>';
         $out .= '<template id="column">';
         $out .= '<tr data-type="TEXT">';
         $out .= '<th scope="row" style="width: 1px;">';
