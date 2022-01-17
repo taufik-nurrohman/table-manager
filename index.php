@@ -1353,7 +1353,6 @@ JS;
         $out .= 'Add a column with type of <code>TEXT</code> and select the 255 maximum characters length constraint to generate a text field.';
         $out .= '</li>';
         $out .= '</ol>';
-        $out .= '<hr>';
         $out .= '<template id="column">';
         $out .= '<tr data-type="TEXT">';
         $out .= '<th scope="row" style="width: 1px;">';
