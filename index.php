@@ -35,7 +35,7 @@ array_walk_recursive($any, static function(&$v) use($values) {
 $DEBUG = true;
 $FILE = __DIR__ . '/table.db';
 
-$CHUNK = 20;
+$CHUNK = 100;
 $EXCERPT = 50;
 $PATTERN_TABLE = "^[A-Z][a-z\\d]*(?:_?[A-Z\\d][a-z\\d]*)*$";
 $PATTERN_TABLE_COLUMN = "^[A-Za-z][A-Za-z\\d]*(?:_?[A-Za-z\\d][a-z\\d]*)*$";
@@ -193,6 +193,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                     'table' => $table,
                     'task' => null
                 ]));
+                exit;
+            }
+            if (isset($_POST['alter']) && 'add' === $_POST['alter']) {
                 exit;
             }
             if ($to === $from) {
@@ -798,51 +801,155 @@ if (!empty($_GET['table'])) {
             $out .= '<input name="column[from]" type="hidden" value=' . $column . '>';
             $out .= '<input name="table" type="hidden" value=' . $name . '>';
         } else {
-            $out .= '<h3>';
-            $out .= 'Table';
-            $out .= '</h3>';
-            $out .= '<p>';
-            $out .= '<input autofocus name="table[to]" placeholder=' . $name . ' pattern="' . $PATTERN_TABLE . '" required type="text" value=' . $name . '>';
-            $out .= '</p>';
-            $out .= '<p>';
-            $out .= '<button name="alter" type="submit" value="1">';
-            $out .= 'Update';
-            $out .= '</button>';
-            $out .= '</p>';
-            $out .= '<h3>';
-            $out .= 'Columns';
-            $out .= '</h3>';
-            $out .= '<ul>';
-            foreach ($columns as $v) {
-                $column = $v->name;
-                $out .= '<li>';
-                $out .= '<a href="' . $path() . $query([
-                    'chunk' => null,
-                    'column' => $column,
-                    'part' => null,
-                    'row' => null,
-                    'sort' => null,
-                    'table' => trim($name, '"'),
-                    'task' => 'alter'
-                ]) . '">';
-                $out .= $column;
-                if (!empty($v->pk)) {
-                    $out .= '<small aria-label="Primary Key" role="status">';
-                    $out .= '*';
-                    $out .= '</small>';
+            if ('add' === ($_GET['alter'] ?? 0)) {
+                $out .= '<h3>';
+                $out .= 'Column';
+                $out .= '</h3>';
+                $out .= '<table>';
+                $out .= '<thead>';
+                $out .= '<tr>';
+                $out .= '<th scope="col">';
+                $out .= 'Key';
+                $out .= '</th>';
+                $out .= '<th scope="col">';
+                $out .= 'Value';
+                $out .= '</th>';
+                $out .= '<th scope="col">';
+                $out .= 'Type';
+                $out .= '</th>';
+                $out .= '<th scope="col">';
+                $out .= 'Rules';
+                $out .= '</th>';
+                $out .= '</tr>';
+                $out .= '</thead>';
+                $out .= '<tbody>';
+                $out .= '<tr data-type="TEXT">';
+                $out .= '<th scope="row" style="width: 1px;">';
+                $out .= '<button class="remove" title="Remove Column" type="button">';
+                $out .= '&minus;';
+                $out .= '</button>';
+                $out .= '<input name="columns[][key]" placeholder="fooBarBaz" pattern="' . $PATTERN_TABLE_COLUMN . '" required type="text">';
+                $out .= '</th>';
+                $out .= '<td style="width: 1px;">';
+                $out .= '<button class="reset" title="Clear Value" type="button">';
+                $out .= '&times;';
+                $out .= '</button>';
+                $out .= '<input list="default-values" name="columns[][value]" placeholder="NULL" type="text">';
+                $out .= '</td>';
+                $out .= '<td>';
+                $types = ['BLOB', 'INTEGER', 'NULL', 'REAL', 'TEXT'];
+                $out .= '<span role="group">';
+                foreach ($types as $type) {
+                    $out .= '<label class="column-type:' . strtolower($type) . '">';
+                    $out .= '<input' . ('TEXT' === $type ? ' checked' : "") . ' name="columns[][type]" type="radio" value="' . $type . '">';
+                    $out .= ' ';
+                    $out .= '<span>';
+                    $out .= '<code>';
+                    $out .= $type;
+                    $out .= '</code>';
+                    $out .= '</span>';
+                    $out .= '</label>';
+                    $out .= ' ';
                 }
+                $out = rtrim($out);
+                $out .= '</span>';
+                $out .= '</td>';
+                $out .= '<td>';
+                $out .= '<span role="group">';
+                $out .= '<label class="column-rule:not-null">';
+                $out .= '<input name="columns[][rule][NOT NULL]" type="checkbox">';
+                $out .= ' ';
+                $out .= '<span>';
+                $out .= '<code>';
+                $out .= 'NOT NULL';
+                $out .= '</code>';
+                $out .= '</span>';
+                $out .= '</label>';
+                $out .= ' ';
+                $out .= '<label class="column-rule:unique">';
+                $out .= '<input name="columns[][rule][UNIQUE]" type="checkbox">';
+                $out .= ' ';
+                $out .= '<span>';
+                $out .= '<code>';
+                $out .= 'UNIQUE';
+                $out .= '</code>';
+                $out .= '</span>';
+                $out .= '</label>';
+                $out .= ' ';
+                $out .= '<label class="column-rule:check-length-max-255">';
+                $out .= '<input name="columns[][rule][CHECK][LENGTH(%s) &lt;= 255]" type="checkbox">';
+                $out .= ' ';
+                $out .= '<span>';
+                $out .= '<code>';
+                $out .= 'LENGTH(?) &lt;= 255';
+                $out .= '</code>';
+                $out .= '</span>';
+                $out .= '</label>';
+                $out .= '</span>';
+                $out .= '</td>';
+                $out .= '</tr>';
+                $out .= '</tbody>';
+                $out .= '</table>';
+                $out .= '<datalist id="default-values">';
+                $out .= '<option>CURRENT_DATE</option>';
+                $out .= '<option>CURRENT_TIME</option>';
+                $out .= '<option>CURRENT_TIMESTAMP</option>';
+                $out .= '<option>FALSE</option>';
+                $out .= '<option>NULL</option>';
+                $out .= '<option>TRUE</option>';
+                $out .= '</datalist>';
+                $out .= '<p>';
+                $out .= '<button name="alter" type="submit" value="add">';
+                $out .= 'Add';
+                $out .= '</button>';
+                $out .= '</p>';
+            } else {
+                $out .= '<h3>';
+                $out .= 'Table';
+                $out .= '</h3>';
+                $out .= '<p>';
+                $out .= '<input autofocus name="table[to]" placeholder=' . $name . ' pattern="' . $PATTERN_TABLE . '" required type="text" value=' . $name . '>';
+                $out .= '</p>';
+                $out .= '<p>';
+                $out .= '<button name="alter" type="submit" value="1">';
+                $out .= 'Update';
+                $out .= '</button>';
+                $out .= '</p>';
+                $out .= '<h3>';
+                $out .= 'Columns';
+                $out .= '</h3>';
+                $out .= '<ul>';
+                foreach ($columns as $v) {
+                    $column = $v->name;
+                    $out .= '<li>';
+                    $out .= '<a href="' . $path() . $query([
+                        'chunk' => null,
+                        'column' => $column,
+                        'part' => null,
+                        'row' => null,
+                        'sort' => null,
+                        'table' => trim($name, '"'),
+                        'task' => 'alter'
+                    ]) . '">';
+                    $out .= $column;
+                    if (!empty($v->pk)) {
+                        $out .= '<small aria-label="Primary Key" role="status">';
+                        $out .= '*';
+                        $out .= '</small>';
+                    }
+                    $out .= '</a>';
+                    $out .= '</li>';
+                }
+                $out .= '</ul>';
+                $out .= '<p>';
+                // TODO
+                $out .= '<a role="button">';
+                $out .= 'Add';
                 $out .= '</a>';
-                $out .= '</li>';
+                $out .= '</p>';
+                $out .= '<input name="table[from]" type="hidden" value=' . $name . '>';
+                $out .= '<input name="task" type="hidden" value="alter">';
             }
-            $out .= '</ul>';
-            $out .= '<p>';
-            // TODO
-            $out .= '<a role="button">';
-            $out .= 'Add';
-            $out .= '</a>';
-            $out .= '</p>';
-            $out .= '<input name="table[from]" type="hidden" value=' . $name . '>';
-            $out .= '<input name="task" type="hidden" value="alter">';
         }
     } else if ('insert' === $task) {
         $out .= '<table>';
@@ -987,9 +1094,9 @@ if (!empty($_GET['table'])) {
                                 $out .= '<img alt="" src="data:' . $m[1] . '/' . $m[2] . ';base64,' . base64_encode($buffer) . '">';
                                 if (isset($m[4])) {
                                     $out .= '<br>';
-                                    $out .= '<small>';
+                                    $out .= '<a href="">';
                                     $out .= $m[4];
-                                    $out .= '</small>';
+                                    $out .= '</a>';
                                 }
                             } else {
                                 $out .= '<small role="status">';
@@ -997,9 +1104,11 @@ if (!empty($_GET['table'])) {
                                 $out .= '</small>';
                             }
                         } else {
-                            $out .= '&#x1f4c4;';
+                            $out .= '&#x2592;';
                             $out .= ' ';
+                            $out .= '<a href="">';
                             $out .= $m[4];
+                            $out .= '</a>';
                         }
                         $out .= '</p>';
                     }
@@ -1096,9 +1205,9 @@ if (!empty($_GET['table'])) {
             'row' => null,
             'sort' => null,
             'table' => trim($name, '"'),
-            'task' => 'alter'
+            'task' => 'insert'
         ]) . '" role="button">';
-        $out .= 'Alter';
+        $out .= 'Insert';
         $out .= '</a>';
         $out .= ' ';
         $out .= '<a href="' . $path() . $query([
@@ -1108,9 +1217,9 @@ if (!empty($_GET['table'])) {
             'row' => null,
             'sort' => null,
             'table' => trim($name, '"'),
-            'task' => 'insert'
+            'task' => 'alter'
         ]) . '" role="button">';
-        $out .= 'Insert';
+        $out .= 'Alter';
         $out .= '</a>';
         $out .= ' ';
         $out .= '<button disabled name="drop" type="submit" value=' . $name . '>';
@@ -1130,7 +1239,7 @@ if (!empty($_GET['table'])) {
             if ($p = (int) $v->pk) {
                 $keys[$n] = $p;
             }
-            $fields[] = 'CASE WHEN INSTR(' . $safe($n, 1) . ', "data:") = 1 AND INSTR(' . $safe($n, 1) . ', ";base64,") THEN "&#x1f4c4; " || SUBSTR(' . $safe($n, 1) . ', INSTR(' . $safe($n, 1) . ', "#") + 1) WHEN LENGTH(' . $safe($n, 1) . ') > ' . $EXCERPT . ' THEN SUBSTR(' . $safe($n, 1) . ', 1, ' . $EXCERPT . ') || "..." ELSE ' . $safe($n, 1) . ' END AS ' . $safe($n, 1);
+            $fields[] = 'CASE WHEN INSTR(' . $safe($n, 1) . ', "data:") = 1 AND INSTR(' . $safe($n, 1) . ', ";base64,") AND INSTR(' . $safe($n, 1) . ', "#") THEN "&#x2592; " || SUBSTR(' . $safe($n, 1) . ', INSTR(' . $safe($n, 1) . ', "#") + 1) WHEN LENGTH(' . $safe($n, 1) . ') > ' . $EXCERPT . ' THEN SUBSTR(' . $safe($n, 1) . ', 1, ' . $EXCERPT . ') || "..." ELSE ' . $safe($n, 1) . ' END AS ' . $safe($n, 1);
             $out .= '<th>';
             $out .= '<a' . ($n === ($_GET['sort'][1] ?? $key) ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
                 'sort' => [1 === ($_GET['sort'][0] ?? -1) ? -1 : 1, $n]
@@ -1251,7 +1360,7 @@ const tableColumns = document.querySelector('#table-columns').textContent.trim()
 const tableRows = document.querySelector('#table-rows').textContent.trim();
 drop.disabled = false;
 drop.addEventListener('click', dropTable, false);
-drop.previousElementSibling.focus(); // Focus to the `insert` “button”
+drop.previousElementSibling.previousElementSibling.focus(); // Focus to the `insert` “button”
 function dropTable(e) {
     if (window.confirm('Dropping a table is a dangerous action. We need to confirm that you consciously want to do so.')) {
         let table = window.prompt('Please write down the table name you want to drop:');
@@ -1290,15 +1399,15 @@ JS;
     }
 } else {
     if ('create' === $task) {
-        $out .= '<p>';
-        $out .= '<label for="' . ($id = 'f:' . substr(uniqid(), 6)) . '">';
+        $out .= '<h3>';
         $out .= 'Table';
-        $out .= '</label>';
-        $out .= '<input autofocus id="' . $id . '" name="table" placeholder="FooBarBaz" pattern="' . $PATTERN_TABLE . '" required type="text">';
-        $out .= '<button class="add" title="Add Column" type="button">';
-        $out .= '&plus;';
-        $out .= '</button>';
+        $out .= '</h3>';
+        $out .= '<p>';
+        $out .= '<input autofocus name="table" placeholder="FooBarBaz" pattern="' . $PATTERN_TABLE . '" required type="text">';
         $out .= '</p>';
+        $out .= '<h3>';
+        $out .= 'Columns';
+        $out .= '</h3>';
         $out .= '<table>';
         $out .= '<thead>';
         $out .= '<tr>';
@@ -1330,8 +1439,20 @@ JS;
         $out .= '</tr>';
         $out .= '</tfoot>';
         $out .= '</table>';
+        $out .= '<datalist id="default-values">';
+        $out .= '<option>CURRENT_DATE</option>';
+        $out .= '<option>CURRENT_TIME</option>';
+        $out .= '<option>CURRENT_TIMESTAMP</option>';
+        $out .= '<option>FALSE</option>';
+        $out .= '<option>NULL</option>';
+        $out .= '<option>TRUE</option>';
+        $out .= '</datalist>';
         $out .= '<p>';
-        $out .= '<button class="create" name="task" type="submit" value="create">';
+        $out .= '<button class="add" title="Add Column" type="button">';
+        $out .= '&plus;';
+        $out .= '</button>';
+        $out .= ' ';
+        $out .= '<button name="task" type="submit" value="create">';
         $out .= 'Create';
         $out .= '</button>';
         $out .= '</p>';
@@ -1344,13 +1465,24 @@ JS;
         $out .= 'Add a column with type of <code>INTEGER</code> and default value of <code>FALSE</code> or <code>TRUE</code> to generate a toggle field. SQLite does not have native <code>BOOLEAN</code> type <a href="https://www.sqlite.org/datatype3.html#boolean_datatype" rel="nofollow" target="_blank">by design</a>, so the data you provide later will be stored as <code>0</code> for <code>false</code> and <code>1</code> for <code>true</code>.';
         $out .= '</li>';
         $out .= '<li>';
-        $out .= 'Add a column with type of <code>TEXT</code> and default value of <code>CURRENT_DATE</code> or <code>CURRENT_TIME</code> or <code>CURRENT_TIMESTAMP</code> to generate a date/time field. SQLite also does not have types to handle date and time data natively, but it does have <a href="https://sqlite.org/syntax/literal-value.html" rel="nofollow" target="_blank">those literals</a> to store the current date and time as <code>INTEGER</code>, <code>REAL</code> or <code>TEXT</code>, depending on the type of column you provide.';
+        $out .= 'Add a column with type of <code>TEXT</code> and default value of <code>CURRENT_DATE</code> or <code>CURRENT_TIME</code> or <code>CURRENT_TIMESTAMP</code> to generate a date/time field. You can also use valid date and/or time pattern such as <code>' . date('Y-m-d') . '</code> in place of <code>CURRENT_DATE</code>, <code>' . date('H:i:s') . '</code> in place of <code>CURRENT_TIME</code> or <code>' . date('Y-m-d H:i:s') . '</code> in place of <code>CURRENT_TIMESTAMP</code>. SQLite does not have types to handle date and time data natively, but it does have <a href="https://sqlite.org/syntax/literal-value.html" rel="nofollow" target="_blank">those literals</a> to store the current date and time as <code>INTEGER</code>, <code>REAL</code> or <code>TEXT</code>, depending on the type of column you provide.';
         $out .= '</li>';
         $out .= '<li>';
         $out .= 'Add a column with type of <code>TEXT</code> and default value of RGB color code in HEX format (e.g. <code>#000000</code>) to generate a color field.';
         $out .= '</li>';
         $out .= '<li>';
         $out .= 'Add a column with type of <code>TEXT</code> and select the 255 maximum characters length constraint to generate a text field.';
+        $out .= '</li>';
+        $out .= '</ol>';
+        $out .= '<h3>';
+        $out .= 'Notes';
+        $out .= '</h3>';
+        $out .= '<ol>';
+        $out .= '<li>';
+        $out .= 'With this application, a column with type of <code>BLOB</code> will store the uploaded files as data <abbr title="Uniform Resource Identifier">URI</abbr>, and not as binary data as it is. This is done to allow storing <abbr title="Multipurpose Internet Mail Extensions">MIME</abbr> type and file name along with the binary data in one cell.';
+        $out .= '</li>';
+        $out .= '<li>';
+        $out .= 'I don&rsquo;t recommend you to just store the files into the database. It would be better if you make a mechanism to store the files in a separate folder. You can then referencing it to a name or relative path stored in the database. Storing files directly to the database will be effective only when handling small amount of data such as storing avatar images and <abbr title="Scalable Vector Graphic">SVG</abbr> icons.';
         $out .= '</li>';
         $out .= '</ol>';
         $out .= '<template id="column">';
@@ -1365,7 +1497,7 @@ JS;
         $out .= '<button class="reset" title="Clear Value" type="button">';
         $out .= '&times;';
         $out .= '</button>';
-        $out .= '<input name="columns[][value]" placeholder="NULL" type="text">';
+        $out .= '<input list="default-values" name="columns[][value]" placeholder="NULL" type="text">';
         $out .= '</td>';
         $out .= '<td>';
         $types = ['BLOB', 'INTEGER', 'NULL', 'REAL', 'TEXT'];
@@ -1422,15 +1554,15 @@ JS;
         $out .= '</template>';
         $out .= '<script>';
         $out .= <<<JS
-const add = document.querySelector('.add');
+const add = document.querySelectorAll('.add');
 const column = document.querySelector('#column');
 const columns = document.querySelector('#columns');
-const create = document.querySelector('.create');
 const keys = document.querySelector('#keys');
-add.addEventListener('click', addColumn, false);
+add.forEach(v => v.addEventListener('click', addColumn, false));
 let index = 0;
 function addColumn() {
-    let key = document.createElement('label'),
+    let id = Date.now() + index,
+        key = document.createElement('label'),
         node = column.content.cloneNode(true),
         remove = node.querySelector('.remove'),
         reset = node.querySelector('.reset');
