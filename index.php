@@ -288,7 +288,7 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 $keys[] = $safe($k, 1);
             }
             sort($keys);
-            $primary = $keys ? ', PRIMARY KEY(' . implode(', ', $keys) . ')' : "";
+            $primary = $keys ? ', PRIMARY KEY (' . implode(', ', $keys) . ')' : "";
             $stmt .= ' (' . implode(', ', $columns) . $primary . ')';
         }
         try {
