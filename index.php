@@ -10,9 +10,6 @@ ini_set('html_errors', 1);
 // Change the value to your time zone
 date_default_timezone_set('Asia/Jakarta');
 
-// TODO: Use native `SQLite3` class and remove composer
-require __DIR__ . '/vendor/autoload.php';
-
 $any = [&$_GET, &$_POST, &$_REQUEST];
 $values = [
     'FALSE' => false,
@@ -41,9 +38,18 @@ $PATTERN_TABLE = "^[A-Z][a-z\\d]*(?:_?[A-Z\\d][a-z\\d]*)*$";
 $PATTERN_TABLE_COLUMN = "^[A-Za-z][A-Za-z\\d]*(?:_?[A-Za-z\\d][a-z\\d]*)*$";
 $SESSION = 'STATUS';
 $THUMB = 320;
+$VERSION = '1.0.0';
 
 $PATH = trim(strtr(strtr(__DIR__ . '/', "\\", '/'), [strtr($_SERVER['DOCUMENT_ROOT'], "\\", '/') => '/']), '/');
 $PATH = "" !== $PATH ? '/' . $PATH . '/index.php' : '/index.php';
+
+$all = static function($result) {
+    $out = [];
+    while ($v = $result->fetchArray(SQLITE3_ASSOC)) {
+        $out[] = (object) $v;
+    }
+    return $out;
+};
 
 $safe = static function($value, $force = false) {
     $value = strip_tags(strtr($value ?? "", ['"' => '""']));
@@ -74,7 +80,7 @@ $pager = static function($current, $count, $chunk, $peek, $fn, $first, $previous
     if ($previous) {
         $out = '<span>';
         if ($current === $begin) {
-            $out .= '<b title="' . $previous . '">' . $previous . '</b>';
+            $out .= '<b aria-current="page" title="' . $previous . '">' . $previous . '</b>';
         } else {
             $out .= '<a href="' . call_user_func($fn, $current - 1) . '" title="' . $previous . '" rel="prev">' . $previous . '</a>';
         }
@@ -90,7 +96,7 @@ $pager = static function($current, $count, $chunk, $peek, $fn, $first, $previous
         }
         for ($i = $min; $i <= $max; ++$i) {
             if ($current === $i) {
-                $out .= ' <b title="' . $i . '">' . $i . '</b>';
+                $out .= ' <b aria-current="page" title="' . $i . '">' . $i . '</b>';
             } else {
                 $out .= ' <a href="' . call_user_func($fn, $i) . '" title="' . $i . '" rel="' . ($current >= $i ? 'prev' : 'next') . '">' . $i . '</a>';
             }
@@ -106,7 +112,7 @@ $pager = static function($current, $count, $chunk, $peek, $fn, $first, $previous
     if ($next) {
         $out .= ' <span>';
         if ($current === $end) {
-            $out .= '<b title="' . $next . '">' . $next . '</b>';
+            $out .= '<b aria-current="page" title="' . $next . '">' . $next . '</b>';
         } else {
             $out .= '<a href="' . call_user_func($fn, $current + 1) . '" title="' . $next . '" rel="next">' . $next . '</a>';
         }
@@ -125,32 +131,52 @@ $query = static function(array $alter = []) {
 };
 
 if (!is_file($FILE)) {
-    $_SESSION[$SESSION][] = 'Table does not exist. Automatically create a table for you.';
+    $_SESSION[$SESSION][] = 'Database does not exist. Automatically create a database for you.';
 }
 
 try {
-    new Pixie\Connection('sqlite', [
-        'database' => $FILE,
-        'driver' => 'sqlite'
-    ], 'Base');
+    $base = new SQLite3($FILE);
+    $base->enableExceptions(true);
 } catch (Exception $e) {
     echo ($_SESSION[$SESSION][] = strtr($e->getMessage(), ["\n" => '<br>']));
     exit;
 }
 
+if ('GET' === $_SERVER['REQUEST_METHOD']) {
+    if (isset($_GET['blob']) && isset($_GET['row']) && isset($_GET['storage']) && isset($_GET['table'])) {
+        $blob = $base->querySingle('SELECT ' . $safe($_GET['storage'], 1) . ' FROM ' . $safe($_GET['table'], 1) . ' WHERE ' . $safe($_GET['column'] ?? 'rowid', 1) . ' = ' . $safe($_GET['row']));
+        if ($blob && $blob !== $_GET['storage']) {
+            http_response_code(200);
+            if (0 === strpos($blob, 'data:') && false !== strpos($blob, ';base64,') && preg_match('/^data:([^\/]+)\/([^;]+);base64,([^#]+)(?:#(.*))?$/', $blob, $m)) {
+                header('content-type: ' . $m[1] . '/' . $m[2]);
+                header('content-disposition: inline; filename="' . ($m[4] ?? uniqid()) . '"');
+                echo base64_decode($m[3]);
+            } else {
+                header('content-type: text/plain');
+                echo $blob;
+            }
+        } else {
+            http_response_code(404);
+            header('content-type: text/plain');
+            echo 'Blob does not exist.';
+        }
+        exit;
+    }
+}
+
 if ('POST' === $_SERVER['REQUEST_METHOD']) {
     if (isset($_POST['drop'])) {
         try {
-            Base::query($stmt = 'DROP TABLE ' . $safe($table = $_POST['drop'], 1))->get();
+            $base->exec($stmt = 'DROP TABLE ' . $safe($table = $_POST['drop'], 1));
             $_SESSION[$SESSION][] = 'Dropped table <code>' . $table . '</code>.';
-            if ($DEBUG) {
-                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
-            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not drop table <code>' . $table . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
+        }
+        if ($DEBUG) {
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
         }
         header('location: ' . $path());
         exit;
@@ -171,18 +197,18 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         if (isset($_POST['column']['to'])) {
             $from = $_POST['column']['from'] ?? 0;
             $to = $_POST['column']['to'] ?? 0;
-            if (isset($_POST['alter']) && 0 === $_POST['alter']) {
+            if (isset($_POST['alter']) && 'drop' === $_POST['alter']) {
                 try {
-                    Base::query($stmt = 'ALTER TABLE ' . $safe($table, 1) . ' DROP COLUMN ' . $safe($from, 1))->get();
+                    $base->exec($stmt = 'ALTER TABLE ' . $safe($table, 1) . ' DROP COLUMN ' . $safe($from, 1));
                     $_SESSION[$SESSION][] = 'Dropped column <code>' . $from . '</code> from table <code>' . $table . '</code>.';
-                    if ($DEBUG) {
-                        $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
-                    }
                 } catch (Exception $e) {
                     $_SESSION[$SESSION][] = 'Could not drop column <code>' . $from . '</code> from table <code>' . $table . '</code>.';
                     if ($DEBUG) {
                         $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
                     }
+                }
+                if ($DEBUG) {
+                    $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
                 }
                 header('location: ' . $path() . $query([
                     'chunk' => null,
@@ -195,24 +221,21 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 ]));
                 exit;
             }
-            if (isset($_POST['alter']) && 'add' === $_POST['alter']) {
-                exit;
-            }
             if ($to === $from) {
                 // Skip!
-                $_SESSION[$SESSION][] = 'Nothing updated.';
+                $_SESSION[$SESSION][] = 'Nothing renamed.';
             } else {
                 try {
-                    Base::query($stmt = 'ALTER TABLE ' . $safe($table, 1) . ' RENAME COLUMN ' . $safe($from, 1) . ' TO ' . $safe($to, 1))->get();
+                    $base->exec($stmt = 'ALTER TABLE ' . $safe($table, 1) . ' RENAME COLUMN ' . $safe($from, 1) . ' TO ' . $safe($to, 1));
                     $_SESSION[$SESSION][] = 'Renamed column in table <code>' . $table . '</code> from <code>' . $from . '</code> to <code>' . $to . '</code>.';
-                    if ($DEBUG) {
-                        $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
-                    }
                 } catch (Exception $e) {
                     $_SESSION[$SESSION][] = 'Could not rename column in table <code>' . $table . '</code> from <code>' . $from . '</code> to <code>' . $to . '</code>.';
                     if ($DEBUG) {
                         $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
                     }
+                }
+                if ($DEBUG) {
+                    $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
                 }
             }
             header('location: ' . $path() . $query([
@@ -226,35 +249,94 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             ]));
             exit;
         }
-        $from = $_POST['table']['from'] ?? 0;
-        $to = $_POST['table']['to'] ?? 0;
-        if ($to === $from) {
-            // Skip!
-            $_SESSION[$SESSION][] = 'Nothing updated.';
-        } else {
-            try {
-                Base::query($stmt = 'ALTER TABLE ' . $safe($from, 1) . ' RENAME TO ' . $safe($to, 1))->get();
-                $_SESSION[$SESSION][] = 'Renamed table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+        if (isset($_POST['table']['to'])) {
+            $from = $_POST['table']['from'] ?? 0;
+            $to = $_POST['table']['to'] ?? 0;
+            if ($to === $from) {
+                // Skip!
+                $_SESSION[$SESSION][] = 'Nothing renamed.';
+            } else {
+                try {
+                    $base->exec($stmt = 'ALTER TABLE ' . $safe($from, 1) . ' RENAME TO ' . $safe($to, 1));
+                    $_SESSION[$SESSION][] = 'Renamed table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                } catch (Exception $e) {
+                    $_SESSION[$SESSION][] = 'Could not rename table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                    if ($DEBUG) {
+                        $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
+                    }
+                }
                 if ($DEBUG) {
                     $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
                 }
+            }
+            header('location: ' . $path() . $query([
+                'chunk' => null,
+                'column' => null,
+                'part' => null,
+                'row' => null,
+                'sort' => null,
+                'table' => $to,
+                'task' => null
+            ]));
+            exit;
+        }
+        if (isset($_POST['alter']) && 'add' === $_POST['alter']) {
+            $columns = [];
+            $options = ['CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', false, null, true];
+            foreach ($_POST['columns'] ?? [] as $k => $v) {
+                $rules = "";
+                $key = $v['key'];
+                $type = $v['type'];
+                $value = $v['value'];
+                foreach ($v['rule'] ?? [] as $kk => $vv) {
+                    if ('CHECK' === $kk && is_array($vv)) {
+                        $kk = 'CHECK(' . sprintf(implode(' AND ', array_keys($vv)), $safe($key, 1)) . ')';
+                    }
+                    $rules .= ' ' . $kk;
+                }
+                $value = in_array($value, $options, true) ? $value : $safe($value);
+                if (false === $value) {
+                    $value = 'FALSE';
+                } else if (null === $value) {
+                    $value = 'NULL';
+                } else if (true === $value) {
+                    $value = 'TRUE';
+                }
+                $columns[$key] = trim($safe($key, 1) . ' ' . $type . ('NULL' !== $value ? ' DEFAULT ' . $value : "") . $rules);
+            }
+            $stmt = 'BEGIN TRANSACTION;' . PHP_EOL;
+            if ($columns) {
+                ksort($columns);
+                foreach ($columns as $v) {
+                    $stmt .= 'ALTER TABLE ' . $safe($table, 1) . ' ADD COLUMN ' . $v . ';' . PHP_EOL;
+                }
+            }
+            $stmt .= 'COMMIT';
+            $count = count($columns);
+            try {
+                $base->exec($stmt);
+                $_SESSION[$SESSION][] = 'Added ' . $count . ' column' . (1 === $count ? "" : 's') . ' to table <code>' . $table . '</code>.';
             } catch (Exception $e) {
-                $_SESSION[$SESSION][] = 'Could not rename table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                $_SESSION[$SESSION][] = 'Could not add ' . $count . ' column' . (1 === $count ? "" : 's') . ' to table <code>' . $table . '</code>.';
                 if ($DEBUG) {
                     $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
                 }
             }
+            if ($DEBUG) {
+                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
+            }
+            header('location: ' . $path() . $query([
+                'alter' => null,
+                'chunk' => null,
+                'column' => null,
+                'part' => null,
+                'row' => null,
+                'sort' => null,
+                'table' => $table,
+                'task' => null
+            ]));
+            exit;
         }
-        header('location: ' . $path() . $query([
-            'chunk' => null,
-            'column' => null,
-            'part' => null,
-            'row' => null,
-            'sort' => null,
-            'table' => $to,
-            'task' => null
-        ]));
-        exit;
     }
     if ('create' === $task) {
         $columns = [];
@@ -292,16 +374,16 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             $stmt .= ' (' . implode(', ', $columns) . $primary . ')';
         }
         try {
-            Base::query($stmt)->get();
+            $base->exec($stmt);
             $_SESSION[$SESSION][] = 'Created table <code>' . $table . '</code>.';
-            if ($DEBUG) {
-                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
-            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not create table <code>' . $table . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
+        }
+        if ($DEBUG) {
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
@@ -316,16 +398,16 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
     }
     if ('delete' === $task) {
         try {
-            Base::query($stmt = 'DELETE FROM ' . $safe($table = $_POST['table'], 1) . ' WHERE ' . $safe($column = $_POST['column'] ?? 'rowid', 1) . ' = ' . $safe($row = $_POST['row']))->get();
+            $base->exec($stmt = 'DELETE FROM ' . $safe($table = $_POST['table'], 1) . ' WHERE ' . $safe($column = $_POST['column'] ?? 'rowid', 1) . ' = ' . $safe($row = $_POST['row']));
             $_SESSION[$SESSION][] = 'Deleted 1 row with ID <code>' . $row . '</code> from table <code>' . $table . '</code>.';
-            if ($DEBUG) {
-                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
-            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not delete row with ID <code>' . $row . '</code> from table <code>' . $table . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
+        }
+        if ($DEBUG) {
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
@@ -377,16 +459,16 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 $values[] = $safe('data:' . $_FILES['values']['type'][$k] . ';base64,' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k])) . '#' . urlencode($v));
             }
             $stmt = 'INSERT INTO ' . $safe($table = $_POST['table'], 1) . ' (' . implode(', ', $keys) . ') VALUES (' . implode(', ', $values) . ')';
-            Base::query($stmt)->get();
+            $base->exec($stmt);
             $_SESSION[$SESSION][] = 'Inserted 1 row to table <code>' . $table . '</code>.';
-            if ($DEBUG) {
-                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
-            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not insert row to table <code>' . $table . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
+        }
+        if ($DEBUG) {
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
@@ -436,16 +518,16 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
                 $values[] = $safe($k, 1) . ' = ' . $safe('data:' . $_FILES['values']['type'][$k] . ';base64,' . base64_encode(file_get_contents($_FILES['values']['tmp_name'][$k])) . '#' . urlencode($v));
             }
             $stmt = 'UPDATE ' . $safe($table = $_POST['table'], 1) . ' SET ' . implode(', ', $values) . ' WHERE ' . $safe($column = $_POST['column'] ?? 'rowid', 1) . ' = ' . $safe($row = $_POST['row']);
-            Base::query($stmt)->get();
+            $base->exec($stmt);
             $_SESSION[$SESSION][] = 'Updated 1 row with ID <code>' . $row . '</code> in table <code>' . $table . '</code>.';
-            if ($DEBUG) {
-                $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
-            }
         } catch (Exception $e) {
             $_SESSION[$SESSION][] = 'Could not update row with ID <code>' . $row . '</code> in table <code>' . $table . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
+        }
+        if ($DEBUG) {
+            $_SESSION[$SESSION][] = '<b>DEBUG:</b> <code>' . htmlspecialchars($stmt) . '</code>';
         }
         header('location: ' . $path() . $query([
             'chunk' => null,
@@ -476,15 +558,15 @@ $style = <<<CSS
 }
 :root {
   background: #fff;
+  border-top: 4px solid;
   color: #000;
   font: normal normal 14px/1.4 sans-serif;
-  padding: 1em;
 }
 a {
   color: #00f;
   text-decoration: none;
 }
-a[aria-current='true'] {
+a[aria-current] {
   color: inherit;
 }
 a:focus,
@@ -492,9 +574,24 @@ a:hover {
   text-decoration: underline;
 }
 b,
+h1,
+h2,
 h3,
 th {
   font-weight: bold;
+}
+b[aria-current] {
+  color: inherit;
+  font-weight: normal;
+}
+body {
+  margin: 1em;
+}
+h1 {
+  font-size: 150%;
+}
+h2 {
+  font-size: 125%;
 }
 a[role='button'],
 button,
@@ -632,19 +729,18 @@ input[type='text'] + button {
   margin-left: -2px;
 }
 label {
+  align-items: center;
   cursor: pointer;
-  display: inline-block;
+  display: inline-flex;
+  gap: .25em;
   user-select: none;
-  vertical-align: middle;
 }
 label + input {
   margin-left: .5em;
 }
-label > input + span {
-  display: inline-block;
-  vertical-align: middle;
-}
 form,
+h1,
+h2,
 h3,
 hr,
 ol,
@@ -751,7 +847,7 @@ $out .= '<body>';
 if (!empty($_SESSION[$SESSION])) {
     foreach ((array) $_SESSION[$SESSION] as $v) {
         $out .= '<p role="alert">';
-        $out .= $v;
+        $out .= strtr($v, ["\n" => '<br>']);
         $out .= '</p>';
     }
 }
@@ -763,9 +859,12 @@ $task = $_GET['task'] ?? null;
 
 if (!empty($_GET['table'])) {
     $name = $safe($_GET['table'], 1);
-    $columns = Base::query('PRAGMA table_info(' . $name . ')')->get();
-    $sql = Base::query('SELECT "sql" FROM "sqlite_master" WHERE "tbl_name" = ' . $name)->first()->sql ?? "";
+    $columns = $all($base->query('PRAGMA table_info(' . $name . ')'));
+    $sql = $base->querySingle('SELECT "sql" FROM "sqlite_master" WHERE "tbl_name" = ' . $name);
     $sql = substr($sql, strpos($sql, '('));
+    usort($columns, static function($a, $b) {
+        return strcmp($a->name ?? "", $b->name ?? "");
+    });
     if ('alter' === $task) {
         if (!empty($_GET['column'])) {
             $column = $safe($_GET['column'], 1);
@@ -784,26 +883,56 @@ if (!empty($_GET['table'])) {
                 $out .= '<input autofocus name="column[to]" placeholder=' . $column . ' pattern="' . $PATTERN_TABLE_COLUMN . '" required type="text" value=' . $column . '>';
                 $out .= '</p>';
                 $out .= '<p>';
-                $out .= '<button name="alter" type="submit" value="1">';
-                $out .= 'Update';
+                $out .= '<button name="alter" type="submit" value="rename">';
+                $out .= 'Rename';
                 $out .= '</button>';
                 $out .= ' ';
-                $out .= '<button name="alter" type="submit" value="0">';
-                $out .= 'Delete';
+                $out .= '<button class="drop" disabled name="alter" type="submit" value="drop">';
+                $out .= 'Drop';
                 $out .= '</button>';
                 $out .= '</p>';
                 $out .= '<input name="task" type="hidden" value="alter">';
             } else {
-                $out .= '<p>';
-                $out .= 'Column <code>' . trim($column, '"') . '</code> does not exist.';
+                http_response_code(404);
+                $out .= '<p role="alert">';
+                $out .= 'Column <code>' . trim($column, '"') . '</code> does not exist in table <code>' . trim($name, '"') . '</code>.';
                 $out .= '</p>';
             }
             $out .= '<input name="column[from]" type="hidden" value=' . $column . '>';
             $out .= '<input name="table" type="hidden" value=' . $name . '>';
+            $out .= '<script>';
+            $out .= <<<JS
+const drop = document.querySelector('.drop');
+const tableColumnName = document.querySelector('input[name="column[to]"]').value.trim();
+const tableName = document.querySelector('input[name="table"]').value.trim();
+drop.disabled = false;
+drop.addEventListener('click', dropTable, false);
+function dropTable(e) {
+    if (window.confirm('Dropping a column is a dangerous action. We need to confirm that you consciously want to do so.')) {
+        let table = window.prompt('Please write down the table name where the column you want to drop is located:');
+        if (table && table === tableName) {
+            let column = window.prompt('Please write down the column name you want to drop in table “' + table + '”:');
+            column = column + "";
+            if ("" !== column && column === tableColumnName) {
+                // Pass!
+            } else {
+                window.alert('Wrong answer.');
+                e.preventDefault();
+            }
+        } else {
+            window.alert('Wrong answer.');
+            e.preventDefault();
+        }
+    } else {
+        e.preventDefault();
+    }
+}
+JS;
+            $out .= '</script>';
         } else {
             if ('add' === ($_GET['alter'] ?? 0)) {
                 $out .= '<h3>';
-                $out .= 'Column';
+                $out .= 'Columns';
                 $out .= '</h3>';
                 $out .= '<table>';
                 $out .= '<thead>';
@@ -822,7 +951,40 @@ if (!empty($_GET['table'])) {
                 $out .= '</th>';
                 $out .= '</tr>';
                 $out .= '</thead>';
-                $out .= '<tbody>';
+                $out .= '<tbody id="columns">';
+                $out .= '</tbody>';
+                $out .= '<tfoot style="display: none;">'; // Hide the primary key setting
+                $out .= '<tr>';
+                $out .= '<th scope="row">';
+                $out .= 'Primary';
+                $out .= '</th>';
+                $out .= '<td colspan="3">';
+                $out .= '<span id="keys" role="group">';
+                $out .= '</span>';
+                $out .= '</td>';
+                $out .= '</tr>';
+                $out .= '</tfoot>';
+                $out .= '</table>';
+                $out .= '<datalist id="default-values">';
+                $out .= '<option>CURRENT_DATE</option>';
+                $out .= '<option>CURRENT_TIME</option>';
+                $out .= '<option>CURRENT_TIMESTAMP</option>';
+                $out .= '<option>FALSE</option>';
+                $out .= '<option>NULL</option>';
+                $out .= '<option>TRUE</option>';
+                $out .= '</datalist>';
+                $out .= '<p>';
+                $out .= '<button class="add" title="Add Column" type="button">';
+                $out .= '&plus;';
+                $out .= '</button>';
+                $out .= ' ';
+                $out .= '<button name="alter" type="submit" value="add">';
+                $out .= 'Add';
+                $out .= '</button>';
+                $out .= '</p>';
+                $out .= '<input name="table" type="hidden" value=' . $name . '>';
+                $out .= '<input name="task" type="hidden" value="alter">';
+                $out .= '<template id="column">';
                 $out .= '<tr data-type="TEXT">';
                 $out .= '<th scope="row" style="width: 1px;">';
                 $out .= '<button class="remove" title="Remove Column" type="button">';
@@ -888,22 +1050,57 @@ if (!empty($_GET['table'])) {
                 $out .= '</span>';
                 $out .= '</td>';
                 $out .= '</tr>';
-                $out .= '</tbody>';
-                $out .= '</table>';
-                $out .= '<datalist id="default-values">';
-                $out .= '<option>CURRENT_DATE</option>';
-                $out .= '<option>CURRENT_TIME</option>';
-                $out .= '<option>CURRENT_TIMESTAMP</option>';
-                $out .= '<option>FALSE</option>';
-                $out .= '<option>NULL</option>';
-                $out .= '<option>TRUE</option>';
-                $out .= '</datalist>';
-                $out .= '<p>';
-                $out .= '<button name="alter" type="submit" value="add">';
-                $out .= 'Add';
-                $out .= '</button>';
-                $out .= '</p>';
-            } else {
+                $out .= '</template>';
+                $out .= '<script>';
+                $out .= <<<JS
+const add = document.querySelectorAll('.add');
+const column = document.querySelector('#column');
+const columns = document.querySelector('#columns');
+const keys = document.querySelector('#keys');
+add.forEach(v => v.addEventListener('click', addColumn, false));
+let index = 0;
+function addColumn() {
+    let key = document.createElement('label'),
+        node = column.content.cloneNode(true),
+        remove = node.querySelector('.remove'),
+        reset = node.querySelector('.reset');
+    remove.addEventListener('click', removeColumn, false);
+    reset.addEventListener('click', resetValue, false);
+    node.querySelectorAll('[name*="[]"]').forEach(v => v.name = v.name.replace(/\[\]/g, '[' + index + ']'));
+    columns.appendChild(node);
+    if (node = columns.querySelector('tr:last-child th input[type="text"]')) {
+        node.__key = key;
+        node.addEventListener('focus', onUpdateKey, false);
+        node.addEventListener('input', onUpdateKey, false);
+        node.addEventListener('keydown', onUpdateKey, false);
+        node.focus();
+        keys.appendChild(key);
+    }
+    columns.querySelectorAll('tr:last-child td input[type="radio"]').forEach(v => v.addEventListener('change', onChangeType, false));
+    ++index;
+}
+function onChangeType() {
+    let type = this.value.split(/\s+/)[0];
+    this.closest('tr').dataset.type = type;
+}
+function onUpdateKey() {
+    let key = this.__key,
+        value = this.value;
+    key.innerHTML = "" !== value ? '<input name="primary[' + value + ']" type="checkbox"> <span>' + value + '</span>' : '<span><i role="status">EMPTY</i></span>';
+}
+function removeColumn() {
+    let key = this.nextElementSibling.__key;
+    key && key.remove();
+    this.parentNode.parentNode.remove();
+}
+function resetValue() {
+    let next = this.nextElementSibling;
+    next && (next.value = ""), next.focus();
+}
+add.length && add[0].click(); // Add a column
+JS;
+                $out .= '</script>';
+            } else if ($columns) {
                 $out .= '<h3>';
                 $out .= 'Table';
                 $out .= '</h3>';
@@ -912,7 +1109,7 @@ if (!empty($_GET['table'])) {
                 $out .= '</p>';
                 $out .= '<p>';
                 $out .= '<button name="alter" type="submit" value="1">';
-                $out .= 'Update';
+                $out .= 'Rename';
                 $out .= '</button>';
                 $out .= '</p>';
                 $out .= '<h3>';
@@ -942,13 +1139,26 @@ if (!empty($_GET['table'])) {
                 }
                 $out .= '</ul>';
                 $out .= '<p>';
-                // TODO
-                $out .= '<a role="button">';
+                $out .= '<a href="' . $path() . $query([
+                    'alter' => 'add',
+                    'chunk' => null,
+                    'column' => null,
+                    'part' => null,
+                    'row' => null,
+                    'sort' => null,
+                    'table' => trim($name, '"'),
+                    'task' => 'alter'
+                ]) . '" role="button">';
                 $out .= 'Add';
                 $out .= '</a>';
                 $out .= '</p>';
                 $out .= '<input name="table[from]" type="hidden" value=' . $name . '>';
                 $out .= '<input name="task" type="hidden" value="alter">';
+            } else {
+                http_response_code(404);
+                $out .= '<p role="alert">';
+                $out .= 'Table <code>' . trim($name, '"') . '</code> does not exist.';
+                $out .= '</p>';
             }
         }
     } else if ('insert' === $task) {
@@ -1039,7 +1249,7 @@ if (!empty($_GET['table'])) {
         $out .= '</p>';
         $out .= '<input name="table" type="hidden" value=' . $name . '>';
     } else if (array_key_exists('row', $_GET)) {
-        if ($row = Base::table(trim($name, '"'))->find($_GET['row'] ?? 0, $_GET['column'] ?? 'rowid')) {
+        if ($row = $all($base->query('SELECT * FROM ' . $name . ' WHERE ' . $safe($_GET['column'] ?? 'rowid', 1) . ' = ' . $safe($_GET['row'] ?? 0)))[0] ?? 0) {
             $out .= '<table>';
             $out .= '<tbody>';
             $first = true;
@@ -1094,7 +1304,16 @@ if (!empty($_GET['table'])) {
                                 $out .= '<img alt="" src="data:' . $m[1] . '/' . $m[2] . ';base64,' . base64_encode($buffer) . '">';
                                 if (isset($m[4])) {
                                     $out .= '<br>';
-                                    $out .= '<a href="">';
+                                    $out .= '<a href="' . $path() . $query([
+                                        'blob' => 1,
+                                        'chunk' => null,
+                                        'column' => null,
+                                        'part' => null,
+                                        'sort' => null,
+                                        'storage' => $n,
+                                        'table' => trim($name, '"'),
+                                        'task' => null
+                                    ]) . '" target="_blank">';
                                     $out .= $m[4];
                                     $out .= '</a>';
                                 }
@@ -1106,7 +1325,16 @@ if (!empty($_GET['table'])) {
                         } else {
                             $out .= '&#x2592;';
                             $out .= ' ';
-                            $out .= '<a href="">';
+                            $out .= '<a href="' . $path() . $query([
+                                'blob' => 1,
+                                'chunk' => null,
+                                'column' => null,
+                                'part' => null,
+                                'sort' => null,
+                                'storage' => $n,
+                                'table' => trim($name, '"'),
+                                'task' => null
+                            ]) . '" target="_blank">';
                             $out .= $m[4];
                             $out .= '</a>';
                         }
@@ -1117,7 +1345,7 @@ if (!empty($_GET['table'])) {
                     if ('FALSE' === $d || 'TRUE' === $d) {
                         $out .= '<span role="group">';
                         $out .= '<label>';
-                        $out .= '<input' . ('1' === $row->{$n} ? ($first ? ' autofocus' : "") . ' checked' : "") . ' name="values[' . $n . ']" type="radio" value="1">';
+                        $out .= '<input' . (1 === (int) $row->{$n} ? ($first ? ' autofocus' : "") . ' checked' : "") . ' name="values[' . $n . ']" type="radio" value="1">';
                         $out .= ' ';
                         $out .= '<span>';
                         $out .= 'Yes';
@@ -1125,7 +1353,7 @@ if (!empty($_GET['table'])) {
                         $out .= '</label>';
                         $out .= ' ';
                         $out .= '<label>';
-                        $out .= '<input' . ('0' === $row->{$n} ? ($first ? ' autofocus' : "") . ' checked' : "") . ' name="values[' . $n . ']" type="radio" value="0">';
+                        $out .= '<input' . (0 === (int) $row->{$n} ? ($first ? ' autofocus' : "") . ' checked' : "") . ' name="values[' . $n . ']" type="radio" value="0">';
                         $out .= ' ';
                         $out .= '<span>';
                         $out .= 'No';
@@ -1182,14 +1410,14 @@ if (!empty($_GET['table'])) {
             $out .= '<input name="row" type="hidden" value=' . $safe($_GET['row'], 1) . '>';
             $out .= '<input name="table" type="hidden" value=' . $name . '>';
         } else {
-            $out .= '<p>';
-            $out .= 'Could not find a row with ID <code>' . $_GET['row'] . '</code> in table <code>' . trim($name, '"') . '</code>.';
+            $out .= '<p role="alert">';
+            $out .= 'Could not find a row with ' . (isset($_GET['column']) ? '<code>' . $_GET['column'] . '</code> value of' : 'ID') . ' <code>' . $_GET['row'] . '</code> in table <code>' . trim($name, '"') . '</code>.';
             $out .= '</p>';
         }
-    } else if ($table = Base::query('PRAGMA table_info(' . $name . ')')->get()) {
+    } else if ($table = $columns) {
         $fields = [];
-        $columns = count((array) $table);
-        $rows = Base::table(trim($name, '"'))->count();
+        $columns = count((array) $columns);
+        $rows = $base->querySingle('SELECT COUNT("rowid") FROM ' . $name);
 
         $out .= '<p role="status">';
         $out .= '<span id="table-columns">' . $columns . '</span> Column' . (1 === $columns ? "" : 's');
@@ -1211,6 +1439,7 @@ if (!empty($_GET['table'])) {
         $out .= '</a>';
         $out .= ' ';
         $out .= '<a href="' . $path() . $query([
+            'alter' => null,
             'chunk' => null,
             'column' => null,
             'part' => null,
@@ -1222,7 +1451,7 @@ if (!empty($_GET['table'])) {
         $out .= 'Alter';
         $out .= '</a>';
         $out .= ' ';
-        $out .= '<button disabled name="drop" type="submit" value=' . $name . '>';
+        $out .= '<button class="drop" disabled name="drop" type="submit" value=' . $name . '>';
         $out .= 'Drop';
         $out .= '</button>';
         $out .= '</p>';
@@ -1230,10 +1459,14 @@ if (!empty($_GET['table'])) {
         $out .= '<table>';
         $out .= '<thead>';
         $out .= '<tr>';
+        $out .= '<!--pk-->';
 
         $keys = [];
 
         $key = $table[0]->name ?? 'rowid';
+        usort($table, static function($a, $b) {
+            return strcmp($a->name ?? "", $b->name ?? "");
+        });
         foreach ($table as $v) {
             $n = $v->name;
             if ($p = (int) $v->pk) {
@@ -1256,11 +1489,13 @@ if (!empty($_GET['table'])) {
 
         // Has 0 or more than 1 primary key(s)!
         if ($has_primary_key_alias = 0 === count($keys) || count($keys) > 1) {
-            $out .= '<th>';
-            $out .= '<span aria-label="Primary Key" role="status">';
-            $out .= '#';
-            $out .= '</span>';
-            $out .= '</th>';
+            $v = "";
+            $v .= '<th>';
+            $v .= '<span aria-label="Primary Key" role="status">';
+            $v .= '#';
+            $v .= '</span>';
+            $v .= '</th>';
+            $out = strtr($out, ['<!--pk-->' => $v]);
         }
 
         $out .= '</tr>';
@@ -1278,11 +1513,11 @@ if (!empty($_GET['table'])) {
         } else {
             sort($fields);
             if ($has_primary_key_alias) {
-                $fields[] = 'rowid';
+                array_unshift($fields, 'rowid');
                 $ref = $keys;
                 $keys = ['rowid' => 1];
             }
-            $rows = Base::query('SELECT ' . implode(', ', $fields) . ' FROM ' . $name . ' ORDER BY ' . $safe($_GET['sort'][1] ?? 'rowid', 1) . ' ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? $CHUNK) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1)))->get();
+            $rows = $all($base->query('SELECT ' . implode(', ', $fields) . ' FROM ' . $name . ' ORDER BY ' . $safe($_GET['sort'][1] ?? 'rowid', 1) . ' ' . (1 === ($_GET['sort'][0] ?? -1) ? 'ASC' : 'DESC') . ' LIMIT ' . ($chunk = $_GET['chunk'] ?? $CHUNK) . ' OFFSET ' . ($chunk * (($_GET['part'] ?? 1) - 1))));
             foreach ($rows as $row) {
                 $out .= '<tr>';
                 foreach ($row as $k => $v) {
@@ -1339,7 +1574,7 @@ if (!empty($_GET['table'])) {
         $out .= '</tbody>';
         $out .= '</table>';
 
-        $the_pager = $pager($_GET['part'] ?? 1, Base::table(trim($name, '"'))->count(), $_GET['chunk'] ?? $CHUNK, 2, static function($part) use($CHUNK, $path, $query) {
+        $the_pager = $pager($_GET['part'] ?? 1, $base->querySingle('SELECT COUNT("rowid") FROM ' . $name), $_GET['chunk'] ?? $CHUNK, 2, static function($part) use($CHUNK, $path, $query) {
             return $path() . strtr($query([
                 'chunk' => $_GET['chunk'] ?? $CHUNK,
                 'part' => $part,
@@ -1355,7 +1590,7 @@ if (!empty($_GET['table'])) {
 
         $out .= '<script>';
         $out .= <<<JS
-const drop = document.querySelector('button[name=drop]');
+const drop = document.querySelector('.drop');
 const tableColumns = document.querySelector('#table-columns').textContent.trim();
 const tableRows = document.querySelector('#table-rows').textContent.trim();
 drop.disabled = false;
@@ -1393,7 +1628,7 @@ JS;
 
     } else {
         http_response_code(404);
-        $out .= '<p>';
+        $out .= '<p role="alert">';
         $out .= 'Table <code>' . trim($name, '"') . '</code> does not exist.';
         $out .= '</p>';
     }
@@ -1458,6 +1693,17 @@ JS;
         $out .= '</p>';
         $out .= '<hr>';
         $out .= '<h3>';
+        $out .= 'Notes';
+        $out .= '</h3>';
+        $out .= '<ol>';
+        $out .= '<li>';
+        $out .= 'On this application, a column with type of <code>BLOB</code> will store the uploaded file as data <abbr title="Uniform Resource Identifier">URI</abbr>, and not as binary data as it is. This is done to allow storing <abbr title="Multipurpose Internet Mail Extensions">MIME</abbr> type and file name along with the binary data in one cell.';
+        $out .= '</li>';
+        $out .= '<li>';
+        $out .= 'I don&rsquo;t recommend you to just store the file into the database. It would be better if you make a certain mechanism that stores your file in a separate folder. You can then referencing it to a name or relative path stored in the database. Storing files directly to the database will be effective only when handling small amount of data such as storing avatar images and <abbr title="Scalable Vector Graphic">SVG</abbr> icons.';
+        $out .= '</li>';
+        $out .= '</ol>';
+        $out .= '<h3>';
         $out .= 'Tips';
         $out .= '</h3>';
         $out .= '<ol>';
@@ -1472,17 +1718,6 @@ JS;
         $out .= '</li>';
         $out .= '<li>';
         $out .= 'Add a column with type of <code>TEXT</code> and select the 255 maximum characters length constraint to generate a text field.';
-        $out .= '</li>';
-        $out .= '</ol>';
-        $out .= '<h3>';
-        $out .= 'Notes';
-        $out .= '</h3>';
-        $out .= '<ol>';
-        $out .= '<li>';
-        $out .= 'With this application, a column with type of <code>BLOB</code> will store the uploaded files as data <abbr title="Uniform Resource Identifier">URI</abbr>, and not as binary data as it is. This is done to allow storing <abbr title="Multipurpose Internet Mail Extensions">MIME</abbr> type and file name along with the binary data in one cell.';
-        $out .= '</li>';
-        $out .= '<li>';
-        $out .= 'I don&rsquo;t recommend you to just store the files into the database. It would be better if you make a mechanism to store the files in a separate folder. You can then referencing it to a name or relative path stored in the database. Storing files directly to the database will be effective only when handling small amount of data such as storing avatar images and <abbr title="Scalable Vector Graphic">SVG</abbr> icons.';
         $out .= '</li>';
         $out .= '</ol>';
         $out .= '<template id="column">';
@@ -1561,8 +1796,7 @@ const keys = document.querySelector('#keys');
 add.forEach(v => v.addEventListener('click', addColumn, false));
 let index = 0;
 function addColumn() {
-    let id = Date.now() + index,
-        key = document.createElement('label'),
+    let key = document.createElement('label'),
         node = column.content.cloneNode(true),
         remove = node.querySelector('.remove'),
         reset = node.querySelector('.reset');
@@ -1588,9 +1822,11 @@ function onChangeType() {
 function onUpdateKey() {
     let key = this.__key,
         value = this.value;
-    key.innerHTML = "" !== value ? '<input name="primary[' + value + ']" type="checkbox"> <span>' + value + '</span>' : "";
+    key.innerHTML = "" !== value ? '<input name="primary[' + value + ']" type="checkbox"> <span>' + value + '</span>' : '<span><i role="status">EMPTY</i></span>';
 }
 function removeColumn() {
+    let key = this.nextElementSibling.__key;
+    key && key.remove();
     this.parentNode.parentNode.remove();
 }
 function resetValue() {
@@ -1599,7 +1835,10 @@ function resetValue() {
 }
 JS;
         $out .= '</script>';
-    } else {
+    } else if (!array_key_exists('task', $_GET)) {
+        $out .= '<h2>';
+        $out .= 'SQLite Table Manager ' . $VERSION;
+        $out .= '</h2>';
         $out .= '<p>';
         $out .= 'I created this project to fulfill my curiosity about databases. If you find this project useful, please <a href="https://github.com/taufik-nurrohman/table-manager" target="_blank">rate it</a> or share it with your friends. But most importantly, please support me to develop <a href="https://github.com/mecha-cms" target="_blank">Mecha</a> further! Thank you 💕';
         $out .= '</p>';
@@ -1612,6 +1851,10 @@ JS;
         $out .= '&copy; 2022 &middot; <a href="https://github.com/taufik-nurrohman" target="_blank">SQLite Table Manager</a>';
         $out .= '</small>';
         $out .= '</p>';
+    } else {
+        $_SESSION[$SESSION][] = 'Unknown task.';
+        header('location: ' . $path());
+        exit;
     }
 }
 
@@ -1622,12 +1865,12 @@ $out .= '<h3>';
 $out .= 'Tables';
 $out .= '</h3>';
 
-if ($tables = Base::query('SELECT "name" FROM "sqlite_master" WHERE "type" = "table" AND "name" NOT LIKE "sqlite_%" ORDER BY "name" ASC')->get()) {
+if ($tables = $all($base->query('SELECT "name" FROM "sqlite_master" WHERE "type" = "table" AND "name" NOT LIKE "sqlite_%" ORDER BY "name" ASC'))) {
     $out .= '<ul>';
     foreach ($tables as $table) {
         $n = $table->name;
         $out .= '<li>';
-        $out .= '<a' . ($n === ($_GET['table'] ?? "") ? ' aria-current="true"' : "") . ' href="' . $path() . $query([
+        $out .= '<a' . ($n === ($_GET['table'] ?? "") ? ' aria-current="page"' : "") . ' href="' . $path() . $query([
             'chunk' => null,
             'column' => null,
             'part' => null,
