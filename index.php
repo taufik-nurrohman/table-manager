@@ -29,7 +29,7 @@ array_walk_recursive($any, static function(&$v) use($values) {
     }
 });
 
-$DEBUG = true;
+$DEBUG = false;
 $FILE = __DIR__ . '/table.db';
 
 $CHUNK = 100;
