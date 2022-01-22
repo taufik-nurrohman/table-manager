@@ -12,8 +12,8 @@ Table Manager
 Features
 --------
 
- - [ ] Add column.
  - [ ] Filter rows.
+ - [x] Add column.
  - [x] Color preview.
  - [x] Create table.
  - [x] Delete row.
