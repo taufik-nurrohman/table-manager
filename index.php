@@ -1,11 +1,20 @@
 <?php session_start();
 
-error_reporting(E_ALL | E_STRICT);
+$BASE = __DIR__ . '/table.db';
+$DEBUG = false;
 
-ini_set('display_errors', true);
-ini_set('display_startup_errors', true);
-ini_set('error_log', __DIR__ . '/errors.log');
-ini_set('html_errors', 1);
+if ($DEBUG) {
+    error_reporting(E_ALL | E_STRICT);
+    ini_set('display_errors', true);
+    ini_set('display_startup_errors', true);
+    ini_set('error_log', __DIR__ . '/errors.log');
+    ini_set('html_errors', 1);
+} else {
+    error_reporting(0);
+    ini_set('display_errors', false);
+    ini_set('display_startup_errors', false);
+    ini_set('max_execution_time', 300); // 5 minute(s)
+}
 
 // Change the value to your time zone
 date_default_timezone_set('Asia/Jakarta');
@@ -28,9 +37,6 @@ array_walk_recursive($any, static function(&$v) use($values) {
         $v = $values[$v] ?? $v;
     }
 });
-
-$DEBUG = false;
-$FILE = __DIR__ . '/table.db';
 
 $CHUNK = 100;
 $EXCERPT = 50;
@@ -130,12 +136,12 @@ $query = static function(array $alter = []) {
     return "" !== $q ? '?' . $q : "";
 };
 
-if (!is_file($FILE)) {
+if (!is_file($BASE)) {
     $_SESSION[$SESSION][] = 'Database does not exist. Automatically create a database for you.';
 }
 
 try {
-    $base = new SQLite3($FILE);
+    $base = new SQLite3($BASE);
     $base->enableExceptions(true);
 } catch (Exception $e) {
     echo ($_SESSION[$SESSION][] = strtr($e->getMessage(), ["\n" => '<br>']));
@@ -168,9 +174,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
     if (isset($_POST['drop'])) {
         try {
             $base->exec($stmt = 'DROP TABLE ' . $safe($table = $_POST['drop'], 1));
-            $_SESSION[$SESSION][] = 'Dropped table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Dropped table <code>' . htmlspecialchars($table) . '</code>.';
         } catch (Exception $e) {
-            $_SESSION[$SESSION][] = 'Could not drop table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Could not drop table <code>' . htmlspecialchars($table) . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
@@ -200,9 +206,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             if (isset($_POST['alter']) && 'drop' === $_POST['alter']) {
                 try {
                     $base->exec($stmt = 'ALTER TABLE ' . $safe($table, 1) . ' DROP COLUMN ' . $safe($from, 1));
-                    $_SESSION[$SESSION][] = 'Dropped column <code>' . $from . '</code> from table <code>' . $table . '</code>.';
+                    $_SESSION[$SESSION][] = 'Dropped column <code>' . htmlspecialchars($from) . '</code> from table <code>' . htmlspecialchars($table) . '</code>.';
                 } catch (Exception $e) {
-                    $_SESSION[$SESSION][] = 'Could not drop column <code>' . $from . '</code> from table <code>' . $table . '</code>.';
+                    $_SESSION[$SESSION][] = 'Could not drop column <code>' . htmlspecialchars($from) . '</code> from table <code>' . htmlspecialchars($table) . '</code>.';
                     if ($DEBUG) {
                         $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
                     }
@@ -227,9 +233,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             } else {
                 try {
                     $base->exec($stmt = 'ALTER TABLE ' . $safe($table, 1) . ' RENAME COLUMN ' . $safe($from, 1) . ' TO ' . $safe($to, 1));
-                    $_SESSION[$SESSION][] = 'Renamed column in table <code>' . $table . '</code> from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                    $_SESSION[$SESSION][] = 'Renamed column in table <code>' . htmlspecialchars($table) . '</code> from <code>' . htmlspecialchars($from) . '</code> to <code>' . htmlspecialchars($to) . '</code>.';
                 } catch (Exception $e) {
-                    $_SESSION[$SESSION][] = 'Could not rename column in table <code>' . $table . '</code> from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                    $_SESSION[$SESSION][] = 'Could not rename column in table <code>' . htmlspecialchars($table) . '</code> from <code>' . htmlspecialchars($from) . '</code> to <code>' . htmlspecialchars($to) . '</code>.';
                     if ($DEBUG) {
                         $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
                     }
@@ -258,9 +264,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             } else {
                 try {
                     $base->exec($stmt = 'ALTER TABLE ' . $safe($from, 1) . ' RENAME TO ' . $safe($to, 1));
-                    $_SESSION[$SESSION][] = 'Renamed table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                    $_SESSION[$SESSION][] = 'Renamed table from <code>' . htmlspecialchars($from) . '</code> to <code>' . htmlspecialchars($to) . '</code>.';
                 } catch (Exception $e) {
-                    $_SESSION[$SESSION][] = 'Could not rename table from <code>' . $from . '</code> to <code>' . $to . '</code>.';
+                    $_SESSION[$SESSION][] = 'Could not rename table from <code>' . htmlspecialchars($from) . '</code> to <code>' . htmlspecialchars($to) . '</code>.';
                     if ($DEBUG) {
                         $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
                     }
@@ -315,9 +321,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             $count = count($columns);
             try {
                 $base->exec($stmt);
-                $_SESSION[$SESSION][] = 'Added ' . $count . ' column' . (1 === $count ? "" : 's') . ' to table <code>' . $table . '</code>.';
+                $_SESSION[$SESSION][] = 'Added ' . $count . ' column' . (1 === $count ? "" : 's') . ' to table <code>' . htmlspecialchars($table) . '</code>.';
             } catch (Exception $e) {
-                $_SESSION[$SESSION][] = 'Could not add ' . $count . ' column' . (1 === $count ? "" : 's') . ' to table <code>' . $table . '</code>.';
+                $_SESSION[$SESSION][] = 'Could not add ' . $count . ' column' . (1 === $count ? "" : 's') . ' to table <code>' . htmlspecialchars($table) . '</code>.';
                 if ($DEBUG) {
                     $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
                 }
@@ -375,9 +381,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
         }
         try {
             $base->exec($stmt);
-            $_SESSION[$SESSION][] = 'Created table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Created table <code>' . htmlspecialchars($table) . '</code>.';
         } catch (Exception $e) {
-            $_SESSION[$SESSION][] = 'Could not create table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Could not create table <code>' . htmlspecialchars($table) . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
@@ -399,9 +405,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
     if ('delete' === $task) {
         try {
             $base->exec($stmt = 'DELETE FROM ' . $safe($table = $_POST['table'], 1) . ' WHERE ' . $safe($column = $_POST['column'] ?? 'rowid', 1) . ' = ' . $safe($row = $_POST['row']));
-            $_SESSION[$SESSION][] = 'Deleted 1 row with ID <code>' . $row . '</code> from table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Deleted 1 row with ID <code>' . htmlspecialchars($row) . '</code> from table <code>' . htmlspecialchars($table) . '</code>.';
         } catch (Exception $e) {
-            $_SESSION[$SESSION][] = 'Could not delete row with ID <code>' . $row . '</code> from table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Could not delete row with ID <code>' . htmlspecialchars($row) . '</code> from table <code>' . htmlspecialchars($table) . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
@@ -460,9 +466,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             }
             $stmt = 'INSERT INTO ' . $safe($table = $_POST['table'], 1) . ' (' . implode(', ', $keys) . ') VALUES (' . implode(', ', $values) . ')';
             $base->exec($stmt);
-            $_SESSION[$SESSION][] = 'Inserted 1 row to table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Inserted 1 row to table <code>' . htmlspecialchars($table) . '</code>.';
         } catch (Exception $e) {
-            $_SESSION[$SESSION][] = 'Could not insert row to table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Could not insert row to table <code>' . htmlspecialchars($table) . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
@@ -519,9 +525,9 @@ if ('POST' === $_SERVER['REQUEST_METHOD']) {
             }
             $stmt = 'UPDATE ' . $safe($table = $_POST['table'], 1) . ' SET ' . implode(', ', $values) . ' WHERE ' . $safe($column = $_POST['column'] ?? 'rowid', 1) . ' = ' . $safe($row = $_POST['row']);
             $base->exec($stmt);
-            $_SESSION[$SESSION][] = 'Updated 1 row with ID <code>' . $row . '</code> in table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Updated 1 row with ID <code>' . htmlspecialchars($row) . '</code> in table <code>' . htmlspecialchars($table) . '</code>.';
         } catch (Exception $e) {
-            $_SESSION[$SESSION][] = 'Could not update row with ID <code>' . $row . '</code> in table <code>' . $table . '</code>.';
+            $_SESSION[$SESSION][] = 'Could not update row with ID <code>' . htmlspecialchars($row) . '</code> in table <code>' . htmlspecialchars($table) . '</code>.';
             if ($DEBUG) {
                 $_SESSION[$SESSION][] = '<b>DEBUG:</b> ' . $e->getMessage() . '.';
             }
@@ -895,7 +901,7 @@ if (!empty($_GET['table'])) {
             } else {
                 http_response_code(404);
                 $out .= '<p role="alert">';
-                $out .= 'Column <code>' . trim($column, '"') . '</code> does not exist in table <code>' . trim($name, '"') . '</code>.';
+                $out .= 'Column <code>' . htmlspecialchars(trim($column, '"')) . '</code> does not exist in table <code>' . htmlspecialchars(trim($name, '"')) . '</code>.';
                 $out .= '</p>';
             }
             $out .= '<input name="column[from]" type="hidden" value=' . $column . '>';
@@ -1157,7 +1163,7 @@ JS;
             } else {
                 http_response_code(404);
                 $out .= '<p role="alert">';
-                $out .= 'Table <code>' . trim($name, '"') . '</code> does not exist.';
+                $out .= 'Table <code>' . htmlspecialchars(trim($name, '"')) . '</code> does not exist.';
                 $out .= '</p>';
             }
         }
@@ -1411,7 +1417,7 @@ JS;
             $out .= '<input name="table" type="hidden" value=' . $name . '>';
         } else {
             $out .= '<p role="alert">';
-            $out .= 'Could not find a row with ' . (isset($_GET['column']) ? '<code>' . $_GET['column'] . '</code> value of' : 'ID') . ' <code>' . $_GET['row'] . '</code> in table <code>' . trim($name, '"') . '</code>.';
+            $out .= 'Could not find a row with ID <code>' . htmlspecialchars($_GET['row']) . '</code> in table <code>' . htmlspecialchars(trim($name, '"')) . '</code>.';
             $out .= '</p>';
         }
     } else if ($table = $columns) {
@@ -1551,13 +1557,14 @@ JS;
                         $out .= '<i aria-label="Empty String Value" role="status">';
                         $out .= 'EMPTY';
                         $out .= '</i>';
+                    } else {
+                        $v = htmlspecialchars($v);
+                        if (0 === strpos($v, '&amp;#x')) {
+                            $v = strtr($v, ['&amp;#x' => '&#x']);
+                        }
+                        $v = strtr($v, ['...' => '&hellip;']);
+                        $out .= $v;
                     }
-                    $v = htmlspecialchars($v);
-                    if (0 === strpos($v, '&amp;#x')) {
-                        $v = strtr($v, ['&amp;#x' => '&#x']);
-                    }
-                    $v = strtr($v, ['...' => '&hellip;']);
-                    $out .= $v;
                     if (!empty($keys[$k])) {
                         $out .= '</a>';
                     }
@@ -1629,7 +1636,7 @@ JS;
     } else {
         http_response_code(404);
         $out .= '<p role="alert">';
-        $out .= 'Table <code>' . trim($name, '"') . '</code> does not exist.';
+        $out .= 'Table <code>' . htmlspecialchars(trim($name, '"')) . '</code> does not exist.';
         $out .= '</p>';
     }
 } else {
